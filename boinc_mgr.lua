@@ -103,11 +103,11 @@ P=dataparser.PARSER("xml", str)
 
 if strutil.strlen(P:value("/boinc_gui_rpc_reply/success")) > 0 
 then 
-Out:puts("~gSUCCESS~0\n")
+Out:puts("\n~gSUCCESS~0\n")
 process.sleep(2)
 return true
 else
-Out:puts("~rERROR: Operation failed~0\n")
+Out:puts("\n~rERROR: Operation failed~0\n")
 Out:puts("~rERROR: " .. P:value("/boinc_gui_rpc_reply/error").."~0\n");
 Out:puts("~rPRESS ENTER~0\n");
 Out:readln()
@@ -347,15 +347,12 @@ end
 
 
 function BoincAttachProject(S, url, authenticator)
-local str, P
+local str
 
 
 str="<boinc_gui_rpc_request>\n<project_attach>\n  <project_url>".. url .. "</project_url>\n  <authenticator>" .. authenticator .. "</authenticator>\n  <project_name></project_name>\n</project_attach>\n</boinc_gui_rpc_request>\n\003"
-S:writeln(str)
-str=S:readto("\003")
-BoincRPCResult(S)
 
-
+return(BoincTransaction(str))
 end
 
 
@@ -363,6 +360,7 @@ end
 function BoincJoinProject(url, authenticator)
 local str, P
 
+Out:puts("Joining "..url.."\n")
 str=acct_pass..acct_email
 str=hash.hashstr(str, "md5", "hex")
 
@@ -457,7 +455,7 @@ str=S:readto("\003")
 P=dataparser.PARSER("xml", str)
 S:close()
 
-if strutil.strlen(P:value("/boinc_gui_rpc_reply/acct_mgr_info/acct_mgr_url"))
+if strutil.strlen(P:value("/boinc_gui_rpc_reply/acct_mgr_info/acct_mgr_url")) > 0
 then
 mgr.name=P:value("/boinc_gui_rpc_reply/acct_mgr_info/acct_mgr_name")
 mgr.url=P:value("/boinc_gui_rpc_reply/acct_mgr_info/acct_mgr_url")
@@ -660,7 +658,7 @@ end
 function AttachedProjectsMenu(Menu, unsort_projects)
 local Selected, i, proj
 local projects={}
-local str
+local str, name
 
 	projects=SortTable(unsort_projects, ProjectsSort)
 
@@ -684,7 +682,15 @@ local str
 		else
 			active=string.format("%6d", proj.jobs_active)
 		end
-		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", string.sub(proj.name, 1, 20), proj.credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+
+		if strutil.strlen(proj.name)==0
+		then
+		name="** ADDING **"
+		else
+		name=string.sub(proj.name, 1, 20)
+		end
+
+		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", name, proj.credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
 		if Out:width() > 60 
 		then
 				if proj.time > 0
@@ -701,26 +707,24 @@ end
 
 
 function BoincTaskOperation(Selected, task)
-local op, str, S
+local op, str
 
 if Selected ~= "exit" 
 then
+	Out:puts("\n"..Selected.. " task "..task.name.."\n")
 	if Selected=="abort" then op="abort_result" end
 	if Selected=="pause" then op="suspend_result" end
 	if Selected=="resume" then op="resume_result" end
 
 	str="<boinc_gui_rpc_request>\n<" .. op .. ">\n  <project_url>" ..  task.url .. "</project_url>\n<name>" .. task.name .. "</name></"..op..">\n</boinc_gui_rpc_request>\n\003"
-	S=stream.STREAM(boinc_host)
-	BoincRPCAuth(S)
-	S:writeln(str)
-	if BoincRPCResult(S)
+
+	if BoincTransaction(str)
 	then
 			if op=="abort_result" then Selected="exit"
 			elseif op=="suspend_result" then task.state="pause"
 			elseif op=="resume_result" then task.state="run"
 			end
 	end
-	S:close()
 end
 
 return Selected 
@@ -836,7 +840,7 @@ Out:puts("CPU: " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
 Out:puts("OPS/s:  integer:" .. strutil.toMetric(state.host.iops, 2) .. "   floating-point:" .. strutil.toMetric(state.host.fpops, 2) .. "\n")
 Out:puts("MEM: " .. strutil.toMetric(state.host.mem)  .. "\n")
 Out:puts("Boinc Version: ".. state.host.client_version .."\n")
-if state.acct_mgr.name then Out:puts("Account Manager: ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") end
+if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 then Out:puts("Account Manager: ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") end
 
 end
 
@@ -872,21 +876,29 @@ end
 
 function DisplayProjectsMenu()
 local projects, sorted, url, proj, Selected
+local wid, len
 
 Out:clear()
 Out:move(0,0)
-Out:puts("SELECT PROJECT\n")
+Out:puts("~B~wSELECT PROJECT~>~0\n")
 projects=BoincGetProjectList()
 sorted=SortTable(projects, ProjectsSort)
-Menu=terminal.TERMMENU(Out, 0, 1, Out:width()-2, 10)
+wid=Out:width() -2
+len=Out:length() -2
+Menu=terminal.TERMMENU(Out, 0, 1, wid, len)
 
 for url,proj in pairs(sorted)
 do
-	Menu:add(proj.name .. "  " .. proj.url .. "  " .. proj.descript , proj.url)
+	str=proj.name .. "  " .. proj.url .. "  " .. proj.descript;
+
+	if strutil.strlen(str) > wid then str=string.sub(str, 1, wid-2) end
+	Menu:add(str, proj.url)
 end
 
 Selected=Menu:run()
 
+Out:clear()
+Out:move(0,0)
 return Selected
 end
 
@@ -1067,16 +1079,12 @@ do
 	elseif Selected=="new_project"
 	then
 		Selected=DisplayProjectsMenu()
-		if strutil.strlen(Selected) then BoincJoinProject(Selected) end
+		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
 
 	else
 		if display_state==1
 		then
-				if DisplayProject(boinc_state.projects[Selected])
-			then
-				state=BoincGetState()
-				MenuDisplayHostReload(Menu, display_state, state)
-			end
+			DisplayProject(boinc_state.projects[Selected])
 		elseif display_state==2
 		then
 			DisplayTask(boinc_state.tasks[Selected])
@@ -1084,6 +1092,10 @@ do
 			ProcessControl(Selected)
 		end
 	end
+
+	state=BoincGetState()
+	MenuDisplayHostReload(Menu, display_state, state)
+
 end
 
 Out:clear()
@@ -1136,7 +1148,7 @@ do
 end
 
 
-if strutil.strlen(server_url) ~= 0
+if strutil.strlen(server_url) > 0
 then
 	if string.sub(server_url, 1, 4)=="ssh:" 
 	then 
