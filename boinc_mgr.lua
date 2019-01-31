@@ -421,23 +421,23 @@ end
 
 
 function BoincRunBenchmarks()
-BoincTransaction("<boinc_gui_rpc_request>\n<run_benchmarks/>\n</boinc_gui_rpc_request>\n\003")
+return(BoincTransaction("<boinc_gui_rpc_request>\n<run_benchmarks/>\n</boinc_gui_rpc_request>\n\003"))
 end
 
 
 
 function BoincShutdown()
-BoincTransaction("<boinc_gui_rpc_request>\n<quit/>\n</boinc_gui_rpc_request>\n\003")
+return(BoincTransaction("<boinc_gui_rpc_request>\n<quit/>\n</boinc_gui_rpc_request>\n\003"))
 end
 
 
 function BoincNetworkAvailable()
-BoincTransaction("<boinc_gui_rpc_request>\n<network_available/>\n</boinc_gui_rpc_request>\n\003")
+return(BoincTransaction("<boinc_gui_rpc_request>\n<network_available/>\n</boinc_gui_rpc_request>\n\003"))
 end
 
 
 function BoincAcctMgrSync()
-BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n  <use_config_file/>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003")
+return(BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n  <use_config_file/>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003"))
 end
 
 
@@ -479,7 +479,7 @@ S=stream.STREAM(boinc_host)
 if S==nil then return nil end
 
 
-Out:puts("~yPLEASE WAIT - UPDATING DATA FROM BOINC~0\n")
+Out:puts("\n~yPLEASE WAIT - UPDATING DATA FROM BOINC~0\n")
 if BoincRPCAuth(S) ~= true then return "unauthorized" end
 
 
@@ -866,7 +866,7 @@ end
 
 Menu:draw()
 
-Out:bar("q:exit app    left/right:select menu page    up/down/enter:select menu item   esc:menu back")
+Out:bar("q:exit app    left/right:select menu page    up/down/enter:select menu item   u:update")
 end
 
 
@@ -879,19 +879,20 @@ local projects, sorted, url, proj, Selected
 local wid, len
 
 Out:clear()
+Out:bar("up/down/enter:select menu item   esc:back")
 Out:move(0,0)
 Out:puts("~B~wSELECT PROJECT~>~0\n")
 projects=BoincGetProjectList()
 sorted=SortTable(projects, ProjectsSort)
-wid=Out:width() -2
-len=Out:length() -2
+wid=Out:width()
+len=Out:length() -3
 Menu=terminal.TERMMENU(Out, 0, 1, wid, len)
 
 for url,proj in pairs(sorted)
 do
 	str=proj.name .. "  " .. proj.url .. "  " .. proj.descript;
 
-	if strutil.strlen(str) > wid then str=string.sub(str, 1, wid-2) end
+	if strutil.strlen(str) > wid-2 then str=string.sub(str, 1, wid-2) end
 	Menu:add(str, proj.url)
 end
 
@@ -950,10 +951,12 @@ local pid
 	then
 		process.chdir(boinc_dir)
 		os.execute("boinc --daemon")
-		process.sleep(2)
+		--we will only get here if os.execute fails
 		os.exit(0)
 	else
 		process.wait(pid)
+		--allow time for boinc to start up
+		process.sleep(2)
 		S=stream.STREAM(boinc_dir.."/gui_rpc_auth.cfg")
 		if S ~=nil
 		then
@@ -1020,7 +1023,7 @@ Out:move(0,2)
 if Selected=="shutdown"
 then
 	Out:puts("~yShutting down boinc~0\n")
-	BoincShutdown()
+	if BoincShutdown() then return "exit" end
 elseif Selected=="update_acct_mgr"
 then
 	Out:puts("~yRequest account manager sync~0\n")
@@ -1033,6 +1036,7 @@ then
 	BoincNetworkAvailable()
 end
 
+return ""
 end
 
 
@@ -1040,7 +1044,7 @@ end
 function DisplayHost()
 local Menu, host, projects, tasks, ch, mgr
 local display_state=0
-local boinc_state
+local boinc_state, result
 
 
 Out:clear()
@@ -1080,7 +1084,6 @@ do
 	then
 		Selected=DisplayProjectsMenu()
 		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
-
 	else
 		if display_state==1
 		then
@@ -1089,13 +1092,13 @@ do
 		then
 			DisplayTask(boinc_state.tasks[Selected])
 		else
-			ProcessControl(Selected)
+			result=ProcessControl(Selected)
+			if result=="exit" then break end
 		end
 	end
 
-	state=BoincGetState()
-	MenuDisplayHostReload(Menu, display_state, state)
-
+	boinc_state=BoincGetState()
+	MenuDisplayHostReload(Menu, display_state, boinc_state)
 end
 
 Out:clear()
