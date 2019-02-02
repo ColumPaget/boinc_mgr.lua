@@ -690,7 +690,7 @@ local str, name
 		name=string.sub(proj.name, 1, 20)
 		end
 
-		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", name, proj.credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", name, proj.host_credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
 		if Out:width() > 60 
 		then
 				if proj.time > 0
@@ -956,7 +956,18 @@ local pid
 	else
 		process.wait(pid)
 		--allow time for boinc to start up
-		process.sleep(2)
+
+		for i=1,5,1
+		do
+		process.sleep(1)
+		S=stream.STREAM(boinc_host)
+		if S ~= nil
+		then
+			S:close()
+			break
+		end
+
+		end
 		S=stream.STREAM(boinc_dir.."/gui_rpc_auth.cfg")
 		if S ~=nil
 		then
@@ -966,8 +977,8 @@ local pid
 		end
 			
 	end
-
 end
+
 
 
 function StartBoincSSHhost()
