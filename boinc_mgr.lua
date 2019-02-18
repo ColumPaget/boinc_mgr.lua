@@ -24,9 +24,10 @@ acct_pass=""
 gui_key=""
 
 default_port="31416"
-server_url="tcp:localhost"
+server_url=""
 boinc_host="tcp:127.0.0.1:"..default_port
 boinc_dir=process.homeDir().."/.boinc"
+hosts={}
 
 function ProjectsSort(p1, p2)
 return(p1.name < p2.name)
@@ -85,8 +86,8 @@ I=P:open("/boinc_gui_rpc_reply");
 str=I:value("nonce") .. gui_key 
 str=hash.hashstr(str, "md5", "hex")
 S:writeln("<boinc_gui_rpc_request>\n<auth2>\n<nonce_hash>"..str.."</nonce_hash>\n</auth2>\n</boinc_gui_rpc_request>\n\3")
-str=S:readto("\003")
 
+str=S:readto("\003")
 P=dataparser.PARSER("xml", str);
 if strutil.strlen(P:value("/boinc_gui_rpc_reply/authorized")) > 0 then return true end
 
@@ -388,11 +389,11 @@ end
 str=P:value("/boinc_gui_rpc_reply/account_out/authenticator")
 if strutil.strlen(str) ==0
 then
-print(P:value("/boinc_gui_rpc_reply/account_out/error_num"))
-print(P:value("/boinc_gui_rpc_reply/account_out/error_msg"))
+	print(P:value("/boinc_gui_rpc_reply/account_out/error_num"))
+	print(P:value("/boinc_gui_rpc_reply/account_out/error_msg"))
 
---try looking up authenticator
-str=BoincAcctLookupAuthenticator(S, url, acct_email, acct_pass)
+	--try looking up authenticator
+	str=BoincAcctLookupAuthenticator(S, url, acct_email, acct_pass)
 end
 
 BoincAttachProject(S, url, str)
@@ -595,10 +596,11 @@ end
 
 Out:puts("~euser:~0 ".. proj.userid .. "  ".. proj.user .. "   ~eteam:~0 ".. proj.teamid .. "  ".. proj.team .."\n")
 Out:puts("~ehost:~0 ".. proj.hostid .. "  ~etime consumed:~0 ".. FormatTime(proj.time) .."\n")
-if proj.time > 0 then 
-Out:puts(string.format("credit:  host: %0.3f    user:%0.3f    host/h:%0.3f   host/m:%0.3f\n", proj.host_credit, proj.credit, proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time))
+if proj.time > 0 
+then 
+	Out:puts(string.format("credit:  host: %0.3f    user:%0.3f    host/h:%0.3f   host/m:%0.3f\n", proj.host_credit, proj.credit, proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time))
 else
-Out:puts(string.format("credit:  host: %0.3f    user:%0.3f    host/h:%0.3f   host/m:%0.3f\n", proj.host_credit, proj.credit, proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time))
+	Out:puts(string.format("credit:  host: %0.3f    user:%0.3f    host/h:%0.3f   host/m:%0.3f\n", proj.host_credit, proj.credit, proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time))
 end
 
 Out:puts(string.format("jobs:  done: %d  queued:%d  active:%d  failed:%d \n", proj.jobs_done, proj.jobs_queued, proj.jobs_active, proj.jobs_fail))
@@ -620,7 +622,7 @@ local ProjectsAltered=false
 
 DisplayProjectDetails(proj)
 
-Menu=terminal.TERMMENU(Out, 1, 15, Out:width()-2, 10)
+Menu=terminal.TERMMENU(Out, 1, 15, Out:width() -2, 10)
 Menu:add("update  - connect to project server", "update")
 if proj.state=="suspend" 
 then
@@ -667,7 +669,7 @@ local str, name
 	Out:move(1,9)
 	
 	str=string.format("  %20s % 10s % 6s % 6s % 6s % 6s", "name", "credit",  "queued", "active", "done", "fail")
-	if Out:width() > 80
+	if Out:width() > 82
 	then
 		str=str..string.format("  % 10s  % 10s", "cred/hour", "cred/min")
 	end
@@ -691,7 +693,8 @@ local str, name
 		end
 
 		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", name, proj.host_credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
-		if Out:width() > 60 
+
+		if Out:width() > 82 
 		then
 				if proj.time > 0
 				then
@@ -754,7 +757,7 @@ do
 	Out:puts(string.format("Progress: %0.2f%%   Time: %s  Remain: %s\n", task.progress * 100, FormatTime(task.cpu_time), FormatTime(task.remain_time)))
 	Out:puts("Received: " .. time.formatsecs("%Y/%m/%d %H:%M:%S", task.received) .. "  Deadline: " .. time.formatsecs("%Y/%m/%d %H:%M:%S", task.deadline) .. "\n")
 	
-	Menu=terminal.TERMMENU(Out, 1, 8, Out:width()-2, 10)
+	Menu=terminal.TERMMENU(Out, 1, 8, Out:width() - 2, 10)
 	if task.state=="run"
 	then
 	Menu:add("pause   - suspend task", "pause")
@@ -884,9 +887,9 @@ Out:move(0,0)
 Out:puts("~B~wSELECT PROJECT~>~0\n")
 projects=BoincGetProjectList()
 sorted=SortTable(projects, ProjectsSort)
-wid=Out:width()
+wid=Out:width() - 2
 len=Out:length() -3
-Menu=terminal.TERMMENU(Out, 0, 1, wid, len)
+Menu=terminal.TERMMENU(Out, 0, 0, wid, len)
 
 for url,proj in pairs(sorted)
 do
@@ -1052,15 +1055,40 @@ end
 
 
 
-function DisplayHost()
+function JoinProjectScreen()
+	if strutil.strlen(acct_email)==0 or strutil.strlen(acct_username)==0 or strutil.strlen(acct_passwd)==0
+	then
+		Out:clear()
+		Out:move(0,4)
+		Out:puts("~R~wERROR: cannot join projects without email, username and password.\n")
+		Out:puts("~R~wPlease restart and provide this information on the command line. \n")
+		Out:puts("~R~w               PRESS ANY KEY                                     \n")
+		Out:getc()
+	else
+		Selected=DisplayProjectsMenu()
+		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
+	end
+end
+
+
+
+function DisplayHost(server_url)
 local Menu, host, projects, tasks, ch, mgr
 local display_state=0
 local boinc_state, result
 
 
+if string.sub(server_url, 1, 4)=="ssh:" 
+then 
+	host=string.sub(server_url, 5) 
+	net.setProxy("sshtunnel:"..host)
+else
+	boinc_host=server_url..":"..default_port
+end
+
 Out:clear()
 Out:move(0,0)
-Out:puts("~yConnecting to host [~w"..server_url.."~y]~0\n")
+Out:puts("~yConnecting to host [~0~e"..server_url.."~y]~0\n")
 
 boinc_state=BoincGetState()
 if boinc_state==nil
@@ -1074,7 +1102,7 @@ then
 	end
 elseif boinc_state=="unauthorized" 
 then
-	Out:puts("~rERROR: authorization failed~0\n")
+	Out:puts("~rERROR: authorization failed~0   [" .. server_url .. "]  [".. gui_key .."]\n")
 	return
 end
 
@@ -1082,7 +1110,7 @@ end
 if boinc_state ~= nil
 then
 
-Menu=terminal.TERMMENU(Out, 1, 10, Out:width()-2, 10)
+Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, 10)
 while true
 do
 	MenuDisplayHostReload(Menu, display_state, boinc_state)
@@ -1093,8 +1121,7 @@ do
 		break
 	elseif Selected=="new_project"
 	then
-		Selected=DisplayProjectsMenu()
-		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
+		JoinProjectScreen()
 	else
 		if display_state==1
 		then
@@ -1122,6 +1149,56 @@ end
 
 end
 
+
+function SelectHost()
+local Menu, name, key
+
+	Out:clear()
+
+	Out:move(0,3)
+	Out:puts("~B~wSelect host to connect to... ~>~0\n")
+	Menu=terminal.TERMMENU(Out, 1, 4, Out:width() - 2, Out:length()-5)
+	for name,key in pairs(hosts)
+	do
+		if name ~= "size" then Menu:add(name) end
+	end
+	Menu:add("exit") 
+
+	selected=Menu:run()
+	if strutil.strlen(selected) > 0
+	then
+		if selected=="exit" then return end
+		gui_key=hosts[selected]
+		DisplayHost(selected)
+	end
+end
+
+
+
+function PrintHelp()
+
+	print("usage: bonic_mgr.lua [url] [options]");
+	print("");
+	print("options:")
+	print("   -key <gui key>      key from gui_rpc_auth.cfg file for boinc server")
+	print("   -user <username>    boinc username needed for joining projects")
+	print("   -email <email>      boinc email needed for joining projects")
+	print("   -pass  <pass>       boinc password needed for joining projects")
+	print("   -save               save gui_key for url")
+	print("   -?                  this help")
+	print("   -h                  this help")
+	print("   -help               this help")
+	print("   --help              this help")
+	print("")
+	print("If no arguments are supplied, boinc_mgr.lua will try to connect to a boinc server at the localhost. If none is running it will ask if one should be started. For such a locally started server boinc_mgr.lua can look up the key from the server's key file. For one it hasn't started itself, or one that is running on a remote host, it needs to be told the key using the -key argument.\n")
+ 	print("boinc_mgr supports two types of url. 'tcp' and 'ssh' urls. 'ssh' urls refer to named configurations in the ssh configuration file normally stored in ~/.ssh/config, and must be configured to auto-login using a private key. boinc_mgr will use these to log into a remote host, then connect to a boinc server running locally on 127.0.0.1. 'tcp' urls just connect directly to a boinc server.\n")
+	print("You can store urls and keys using the '-save' argument like this:")
+	print("   boinc_mgr.lua <url> -key <key> -save")
+	print("If you save a number of such urls and keys then the program will start to offer a choice of hosts to connect to\n")
+  print("If you are going to attach projects to a boinc server, then you'll need to supply the -user, -email and -pass arguments for that project. These are never stored on disk.")
+	
+	os.exit()
+end
 
 
 function ParseCmdLine(arg)
@@ -1154,6 +1231,9 @@ do
 		elseif arg[i] == "-save"
 		then
 			save_key="y"
+		elseif arg[i] == "-?" or arg[i] == "-h" or arg[i] == "-help" or arg[i] == "--help"
+		then
+			PrintHelp()
 		else
 			server_url=arg[i]
 		end
@@ -1162,17 +1242,6 @@ do
 end
 
 
-if strutil.strlen(server_url) > 0
-then
-	if string.sub(server_url, 1, 4)=="ssh:" 
-	then 
-		host=string.sub(server_url, 5) 
-		net.setProxy("sshtunnel:"..host)
-	else
-		boinc_host=server_url..":"..default_port
-	end
-end
-
 if save_key == "y" then SaveGuiKey() end 
 
 end
@@ -1180,8 +1249,8 @@ end
 
 
 
-function BoincLoadKey(server_url)
-local S, str
+function BoincLoadHosts()
+local S, str, host, key
 
 S=stream.STREAM(boinc_dir.."/keys.txt","r")
 if S ~= nil
@@ -1189,13 +1258,14 @@ then
 str=S:readln()
 while str ~= nil
 do
+
 	str=strutil.stripTrailingWhitespace(str)
 	toks=strutil.TOKENIZER(str, " ")
+	host=toks:next()
+	key=toks:next()
 
-	if server_url == toks:next()
-	then
-		gui_key=toks:next()
-	end
+	hosts[host]=key
+	hosts.size=hosts.size+1
 	str=S:readln()
 end
 S:close()
@@ -1203,6 +1273,16 @@ end
 
 end
 
+
+
+function ReformatServerURL(server_url)
+local info
+
+if strutil.strlen(server_url)==0 then return server_url end
+info=net.parseURL(server_url)
+return(info.type .. "://" .. info.host)
+
+end
 
 -- MAIN STARTS HERE --
 
@@ -1215,16 +1295,32 @@ if strutil.strlen(tempstr) > 0 then acct_email=tempstr end
 tempstr=process.getenv("BOINC_PASSWORD")
 if strutil.strlen(tempstr) > 0 then acct_pass=tempstr end
 
-
+hosts.size=0
 
 ParseCmdLine(arg)
 
+server_url=ReformatServerURL(server_url)
 Out=terminal.TERM()
 --Out:hidecursor()
 
+BoincLoadHosts()
 
-BoincLoadKey(server_url)
-DisplayHost()
+if strutil.strlen(server_url) > 0 
+then
+	if strutil.strlen(gui_key) ==0 then gui_key=hosts[server_url] end
+	DisplayHost(server_url) 
+else
+	if hosts.size > 1 
+	then
+		SelectHost()
+	else
+		if strutil.strlen(gui_key) ==0 then gui_key=hosts["tcp:localhost"] end
+		DisplayHost("tcp:localhost") 
+	end
+end
+
+Out:clear()
+Out:move(0,0)
 Out:reset()
 
 
