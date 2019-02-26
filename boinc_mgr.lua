@@ -576,9 +576,9 @@ then
 	Out:puts(string.format("state: ~gRUNNING~0  (%d active jobs)\n", proj.jobs_active))
 	elseif proj.jobs_queued > 0 
 	then
-		Out:puts("state: ~e~yactive - work queued~0\n")
+		Out:puts("state: ~yactive - work queued~0\n")
 	else
-		Out:puts("state: ~yactive - no work~0\n")
+		Out:puts("state: ~cactive - no work~0\n")
 	end
 elseif proj.state=="nomore" 
 then
@@ -622,7 +622,7 @@ local ProjectsAltered=false
 
 DisplayProjectDetails(proj)
 
-Menu=terminal.TERMMENU(Out, 1, 15, Out:width() -2, 10)
+Menu=terminal.TERMMENU(Out, 1, 15, Out:width() -2, Out:length()-17)
 Menu:add("update  - connect to project server", "update")
 if proj.state=="suspend" 
 then
@@ -1012,6 +1012,7 @@ end
 function AskToConnectToHost()
 local str
 
+print("ASK: ["..server_url.."]")
 if server_url ~= "tcp:localhost"
 then
 return false
@@ -1056,7 +1057,7 @@ end
 
 
 function JoinProjectScreen()
-	if strutil.strlen(acct_email)==0 or strutil.strlen(acct_username)==0 or strutil.strlen(acct_passwd)==0
+	if strutil.strlen(acct_email)==0 or strutil.strlen(acct_username)==0 or strutil.strlen(acct_pass)==0
 	then
 		Out:clear()
 		Out:move(0,4)
@@ -1315,12 +1316,13 @@ else
 		SelectHost()
 	else
 		if strutil.strlen(gui_key) ==0 then gui_key=hosts["tcp:localhost"] end
-		DisplayHost("tcp:localhost") 
+		server_url="tcp:localhost"
+		DisplayHost(server_url) 
+		print("try localhost")
 	end
 end
 
-Out:clear()
-Out:move(0,0)
 Out:reset()
+
 
 
