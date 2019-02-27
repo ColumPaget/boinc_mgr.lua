@@ -68,16 +68,21 @@ end
 function SaveGuiKey()
 local S
 
+if strutil.strlen(server_url) > 0 and strutil.strlen(gui_key) > 0
+then
 filesys.mkdir(boinc_dir)
 S=stream.STREAM(boinc_dir.."/keys.txt","a")
 S:writeln(server_url.." "..gui_key.."\n")
 S:close()
+end
 
 end
 
 
 function BoincRPCAuth(S)
 local P, I, str
+
+if strutil.strlen(gui_key)==0 then return false end
 
 S:writeln("<boinc_gui_rpc_request>\n<auth1/>\n</boinc_gui_rpc_request>\n\003");
 str=S:readto("\003")
@@ -1009,11 +1014,10 @@ end
 
 
 
-function AskToConnectToHost()
+function AskToConnectToHost(server_url)
 local str
 
-print("ASK: ["..server_url.."]")
-if server_url ~= "tcp:localhost"
+if server_url ~= "tcp://localhost"
 then
 return false
 end
@@ -1095,7 +1099,7 @@ boinc_state=BoincGetState()
 if boinc_state==nil
 then
 	Out:puts("~rERROR: failed to connect to boinc at " .. server_url.."~0\n")
-	if AskToConnectToHost() 
+	if AskToConnectToHost(server_url) 
 	then 
 		boinc_state=BoincGetState() 
 	else
@@ -1103,7 +1107,8 @@ then
 	end
 elseif boinc_state=="unauthorized" 
 then
-	Out:puts("~rERROR: authorization failed~0   [" .. server_url .. "]  [".. gui_key .."]\n")
+	Out:puts("~rERROR: authorization failed~0\n")
+	if strutil.strlen(gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
 	return
 end
 
@@ -1276,14 +1281,6 @@ end
 
 
 
-function ReformatServerURL(server_url)
-local info
-
-if strutil.strlen(server_url)==0 then return server_url end
-info=net.parseURL(server_url)
-return(info.type .. "://" .. info.host)
-
-end
 
 -- MAIN STARTS HERE --
 
@@ -1300,7 +1297,6 @@ hosts.size=0
 
 ParseCmdLine(arg)
 
-server_url=ReformatServerURL(server_url)
 Out=terminal.TERM()
 --Out:hidecursor()
 
@@ -1308,6 +1304,7 @@ BoincLoadHosts()
 
 if strutil.strlen(server_url) > 0 
 then
+	server_url=net.reformatURL(server_url)
 	if strutil.strlen(gui_key) ==0 then gui_key=hosts[server_url] end
 	DisplayHost(server_url) 
 else
@@ -1315,10 +1312,10 @@ else
 	then
 		SelectHost()
 	else
-		if strutil.strlen(gui_key) ==0 then gui_key=hosts["tcp:localhost"] end
-		server_url="tcp:localhost"
+		if strutil.strlen(gui_key) ==0 then gui_key=hosts["tcp://localhost"] end
+
+		server_url="tcp://localhost"
 		DisplayHost(server_url) 
-		print("try localhost")
 	end
 end
 
