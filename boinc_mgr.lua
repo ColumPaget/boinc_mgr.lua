@@ -27,6 +27,7 @@ default_port="31416"
 server_url=""
 boinc_host="tcp:127.0.0.1:"..default_port
 boinc_dir=process.homeDir().."/.boinc"
+save_key="n"
 hosts={}
 
 function ProjectsSort(p1, p2)
@@ -673,7 +674,7 @@ local str, name
 	Out:puts(" Control   [~eProjects~0]    Tasks     Settings")
 	Out:move(1,9)
 	
-	str=string.format("  %20s % 10s % 6s % 6s % 6s % 6s", "name", "credit",  "queued", "active", "done", "fail")
+	str=string.format("  %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
 	if Out:width() > 82
 	then
 		str=str..string.format("  % 10s  % 10s", "cred/hour", "cred/min")
@@ -697,7 +698,7 @@ local str, name
 		name=string.sub(proj.name, 1, 20)
 		end
 
-		str=string.format("%20s % 10.2f % 6d %s % 6d % 6d", name, proj.host_credit,  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+		str=string.format("%20s % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
 
 		if Out:width() > 82 
 		then
@@ -795,7 +796,7 @@ local tasks={}
 		if task.slot > -1
 		then
 			due=time.formatsecs("%y/%m/%d", task.deadline)
-			Menu:add(string.format("%04d % 20s %6s % 7.2f%%  %8s  %8s %8s", task.slot, string.sub(task.proj_name,1,25), task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
+			Menu:add(string.format("%04d % 20s %6s % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
 		end
 	end
 	Menu:add("exit app", "exit")
@@ -1209,7 +1210,6 @@ end
 
 function ParseCmdLine(arg)
 local host="localhost"
-local save_key="n"
 local i
 
 
@@ -1248,7 +1248,6 @@ do
 end
 
 
-if save_key == "y" then SaveGuiKey() end 
 
 end
 
@@ -1302,21 +1301,23 @@ Out=terminal.TERM()
 
 BoincLoadHosts()
 
-if strutil.strlen(server_url) > 0 
-then
-	server_url=net.reformatURL(server_url)
-	if strutil.strlen(gui_key) ==0 then gui_key=hosts[server_url] end
-	DisplayHost(server_url) 
-else
-	if hosts.size > 1 
-	then
-		SelectHost()
-	else
-		if strutil.strlen(gui_key) ==0 then gui_key=hosts["tcp://localhost"] end
 
-		server_url="tcp://localhost"
-		DisplayHost(server_url) 
+if strutil.strlen(server_url) ==0 and hosts.size > 1
+then
+		SelectHost()
+else
+	if strutil.strlen(server_url) ==0 then server_url="tcp://localhost"
+	else server_url=net.reformatURL(server_url)
 	end
+
+	if strutil.strlen(gui_key) ==0 
+	then 
+		gui_key=hosts[server_url] 
+	elseif save_key == "y" 
+	then 
+		SaveGuiKey() 
+	end 
+	DisplayHost(server_url) 
 end
 
 Out:reset()
