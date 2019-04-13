@@ -29,4 +29,3 @@ Hosts that are accessed via SSH must be configured in the ~/.ssh/config file wit
 
 If run without any arguments the program will try to connect to a boinc process at "tcp:localhost". If it can't connect it will offer to start a new boinc process in "~/.boinc" and store the key for it.
 
-Currently the "Settings" menu just displays the app settings, they cannot yet be modified. However, projects and tasks can be managed via the menus.
