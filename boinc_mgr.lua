@@ -9,6 +9,13 @@ require("net")
 require("hash")
 
 
+DISPLAY_CONTROLS=0
+DISPLAY_PROJECTS=1
+DISPLAY_TASKS=2
+DISPLAY_LOGS=3
+
+
+
 --[[
 Set these to the email, username and password that you use to create accounts on boinc projects
 OR use the environment variables BOINC_USERNAME, BOINC_EMAIL and BOINC_PASSWORD which override these
@@ -29,6 +36,19 @@ boinc_host="tcp:127.0.0.1:"..default_port
 boinc_dir=process.homeDir().."/.boinc"
 save_key="n"
 hosts={}
+
+boinc_settings={} 
+
+
+
+function ToBoolean(val)
+
+if val== nil then return "false" end
+if val== "true" then return "true" end
+if val== "1" then return "true" end
+return "false"
+end
+
 
 function ProjectsSort(p1, p2)
 return(p1.name < p2.name)
@@ -102,25 +122,45 @@ end
 
 
 
-function BoincRPCResult(S)
-local str, P
-
-str=S:readto("\003")
-P=dataparser.PARSER("xml", str)
+function BoincRPCResult(P, Type)
 
 if strutil.strlen(P:value("/boinc_gui_rpc_reply/success")) > 0 
 then 
-Out:puts("\n~gSUCCESS~0\n")
+Out:bar(" SUCCESS: "..Type.." request processed","fcolor=white bcolor=green")
 process.sleep(2)
 return true
 else
-Out:puts("\n~rERROR: Operation failed~0\n")
-Out:puts("~rERROR: " .. P:value("/boinc_gui_rpc_reply/error").."~0\n");
-Out:puts("~rPRESS ENTER~0\n");
+Out:bar(" ERROR: " .. Type .. "request failed. " .. P:value("/boinc_gui_rpc_reply/error"), "fcolor=white bcolor=red");
 Out:readln()
 end
 
 return false
+end
+
+
+function BoincTransaction(xml, CheckSuccess, Type)
+local S, P, str, result
+
+S=stream.STREAM(boinc_host)
+Out:bar("Sending "..Type.." request to server ...", "fcolor=yellow bcolor=magenta")
+BoincRPCAuth(S)
+S:writeln(xml)
+str=S:readto("\003")
+P=dataparser.PARSER("xml", str)
+
+if CheckSuccess then result=BoincRPCResult(P, Type) end
+S:close()
+
+return P
+end
+
+
+
+-- parser and subitems are global here, to allow us to remember the logs between displays, and not fetch them fresh every time
+function GetLogs()
+	g_LogParser=BoincTransaction("<boinc_gui_rpc_request>\n<get_messages/>\n</boinc_gui_rpc_request>\n\003",false, "Get Logs")
+	g_Logs=g_LogParser:open("/boinc_gui_rpc_reply/msgs")
+	return g_Logs
 end
 
 
@@ -202,6 +242,7 @@ project.jobs_done=tonumber(info:value("njobs_success"))
 project.jobs_fail=tonumber(info:value("njobs_error"))
 project.jobs_queued=0
 project.jobs_active=0
+project.disk_usage=0
 project.time=tonumber(info:value("elapsed_time"))
 if project.time == nil then project.time=0 end
 
@@ -271,19 +312,7 @@ return(wu)
 end
 
 
-function BoincParseSettings(info)
-local settings={}
 
-settings.run_user_active=item:value("run_if_user_active")
-settings.run_on_batteries=item:value("run_on_batteries")
-settings.battery_min_charge=string.format("%0.2f%%", tonumber(item:value("battery_charge_min_pct")))
-settings.suspend_cpu_usage=string.format("%0.2f%%",  tonumber(item:value("suspend_cpu_usage")))
-settings.max_vm_percent=string.format("%0.2f%%", tonumber(item:value("vm_max_used_pct")))
-settings.max_ram_busy_percent=string.format("%0.2f%%", tonumber(item:value("ram_max_used_busy_pct")))
-settings.max_ram_idle_percent=string.format("%0.2f%%", tonumber(item:value("ram_max_used_idle_pct")))
-
-return settings
-end
 
 
 
@@ -326,6 +355,10 @@ end
 end
 
 
+
+
+
+
 function BoincAcctLookupAuthenticator(S, url, email, passwd)
 local str, P
 
@@ -354,12 +387,7 @@ end
 
 
 function BoincAttachProject(S, url, authenticator)
-local str
-
-
-str="<boinc_gui_rpc_request>\n<project_attach>\n  <project_url>".. url .. "</project_url>\n  <authenticator>" .. authenticator .. "</authenticator>\n  <project_name></project_name>\n</project_attach>\n</boinc_gui_rpc_request>\n\003"
-
-return(BoincTransaction(str))
+return(BoincTransaction("<boinc_gui_rpc_request>\n<project_attach>\n  <project_url>".. url .. "</project_url>\n  <authenticator>" .. authenticator .. "</authenticator>\n  <project_name></project_name>\n</project_attach>\n</boinc_gui_rpc_request>\n\003", true, "Attach Project"))
 end
 
 
@@ -367,7 +395,7 @@ end
 function BoincJoinProject(url, authenticator)
 local str, P
 
-Out:puts("Joining "..url.."\n")
+Out:bar("Joining "..url, "fcolor=black bcolor=yellow")
 str=acct_pass..acct_email
 str=hash.hashstr(str, "md5", "hex")
 
@@ -411,56 +439,33 @@ end
 
 
 
-function BoincTransaction(xml)
-local S, result
-
-S=stream.STREAM(boinc_host)
-Out:puts("\nSending request...\n")
-BoincRPCAuth(S)
-S:writeln(xml)
-result=BoincRPCResult(S)
-S:close()
-
-return result
-end
-
-
-
-
 function BoincRunBenchmarks()
-return(BoincTransaction("<boinc_gui_rpc_request>\n<run_benchmarks/>\n</boinc_gui_rpc_request>\n\003"))
+return(BoincTransaction("<boinc_gui_rpc_request>\n<run_benchmarks/>\n</boinc_gui_rpc_request>\n\003", true, "Run Benchmarks"))
 end
 
 
 
 function BoincShutdown()
-return(BoincTransaction("<boinc_gui_rpc_request>\n<quit/>\n</boinc_gui_rpc_request>\n\003"))
+return(BoincTransaction("<boinc_gui_rpc_request>\n<quit/>\n</boinc_gui_rpc_request>\n\003",true, "SHUTDOWN"))
 end
 
 
 function BoincNetworkAvailable()
-return(BoincTransaction("<boinc_gui_rpc_request>\n<network_available/>\n</boinc_gui_rpc_request>\n\003"))
+return(BoincTransaction("<boinc_gui_rpc_request>\n<network_available/>\n</boinc_gui_rpc_request>\n\003",true, "Network available"))
 end
 
 
 function BoincAcctMgrSync()
-return(BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n  <use_config_file/>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003"))
+return(BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n  <use_config_file/>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003",true, "Sync with account manager"))
 end
 
 
 
 function BoincAcctMgrLookup()
-local str, S
+local P
 local mgr={}
 
-S=stream.STREAM(boinc_host)
-BoincRPCAuth(S)
-
-S:writeln("<boinc_gui_rpc_request>\n<acct_mgr_info>\n</boinc_gui_rpc_request>\n\003")
-str=S:readto("\003")
-
-P=dataparser.PARSER("xml", str)
-S:close()
+P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_info/>\n</boinc_gui_rpc_request>\n\003", false, "Lookup account manager info")
 
 if strutil.strlen(P:value("/boinc_gui_rpc_reply/acct_mgr_info/acct_mgr_url")) > 0
 then
@@ -473,6 +478,36 @@ return(nil)
 end
 
 
+function BoincUpdateProjectsDiskUsage(state, projects)
+local items, item, url, du
+
+P=BoincTransaction("<boinc_gui_rpc_request>\n<get_disk_usage/>\n</boinc_gui_rpc_request>\n\003",false,"Get Disk Usage")
+items=P:open("/boinc_gui_rpc_reply/disk_usage_summary")
+state.disk_usage=tonumber(items:value("d_boinc"))
+state.disk_total=tonumber(items:value("d_total"))
+state.disk_free=tonumber(items:value("d_free"))
+
+item=items:next()
+while item ~= nil
+do
+	if item:name()=="project"
+	then
+		url=item:value("master_url")
+		if url ~= nil
+		then
+		du=tonumber(item:value("disk_usage"))
+		state.disk_usage=state.disk_usage + du
+		projects[url].disk_usage=du
+		end
+	end
+	item=items:next()
+end
+
+return(nil)
+end
+
+
+
 
 function BoincGetState()
 local str, host, proj, task, S
@@ -480,7 +515,6 @@ local state={}
 
 state.projects={}
 state.tasks={}
-state.settings={}
 
 S=stream.STREAM(boinc_host)
 if S==nil then return nil end
@@ -519,21 +553,297 @@ then
 	state.tasks[task.name]=task
 end
 
-if item:name()=="global_preferences" 
-then 
-	state.settings=BoincParseSettings(item)
-end
-
 
 item=I:next()
 end
 
 
+BoincUpdateProjectsDiskUsage(state, state.projects)
 BoincUpdateProjectTasks(state.projects, state.tasks);
 state.acct_mgr=BoincAcctMgrLookup()
 
 return state
 end
+
+
+function BoincSettingGetDescription(name)
+if boinc_settings[name]==nil then return "" end
+if boinc_settings[name].description==nil then return "" end
+return boinc_settings[name].description
+end
+
+function BoincSettingIsBoolean(name)
+if boinc_settings[name]==nil then return false end
+if boinc_settings[name].dtype=="bool" then return true end
+return false
+end
+
+function BoincSettingIsNumeric(name)
+if boinc_settings[name]==nil then return false end
+if boinc_settings[name].dtype=="num" then return true end
+return false
+end
+
+function BoincSettingIsInteger(name)
+if boinc_settings[name]==nil then return false end
+if boinc_settings[name].dtype=="int" then return true end
+return false
+end
+
+function BoincSettingIsIgnored(name)
+if boinc_settings[name]==nil then return false end
+if boinc_settings[name].dtype=="ignore" then return true end
+return false
+end
+
+
+
+function BoincXMLAddValue(XML, id, name, value)
+XML=XML.."<"..name..">"
+if BoincSettingIsBoolean(id) == true
+then
+	if ToBoolean(value) == "true"
+	then
+		XML=XML.."1"
+	else
+		XML=XML.."0"
+	end
+else
+	XML=XML..value
+end
+
+XML=XML.."</"..name..">\n"
+
+return XML
+end
+
+function BoincSetClientConfig(Config)
+local str, id, name, value
+
+str="<boinc_gui_rpc_request>\n<set_cc_config>\n"
+for id,value in pairs(Config)
+do
+	if string.sub(id, 1, 3)=="cc:"
+	then
+	name=string.sub(id, 4)						
+	str=BoincXMLAddValue(str, id, name, value)
+	end
+end
+str=str.. "</set_cc_config>\n</boinc_gui_rpc_request>\n\003"
+
+BoincTransaction(str, true, "Set client config (cc_config.xml)")
+P=BoincTransaction("<boinc_gui_rpc_request>\n<read_cc_config/>\n</boinc_gui_rpc_request>\n\003", false, "Read cc_config file")
+end
+
+
+function BoincSetGlobalPrefs(Config)
+local str, id, name, value
+
+str="<boinc_gui_rpc_request>\n<set_global_prefs_override>\n<global_preferences>\n"
+for id,value in pairs(Config)
+do
+	if string.sub(id, 1, 6)=="prefs:"
+	then
+	name=string.sub(id, 7)						
+	str=BoincXMLAddValue(str, id, name, value)
+	end
+end
+str=str.. "</global_preferences>\n</set_global_prefs_override>\n</boinc_gui_rpc_request>\n\003"
+
+BoincTransaction(str, true, "Set Global Preferences")
+BoincTransaction("<boinc_gui_rpc_request>\n<read_global_prefs_override/>\n</boinc_gui_rpc_request>\n\003", true, "Activate Preferences")
+end
+
+
+
+function BoincParseSetting(Config, prefix, name, value)
+local id
+
+id=prefix..name;
+if BoincSettingIsBoolean(id) 
+then 
+	Config[id]=ToBoolean(value)
+elseif BoincSettingIsInteger(id)
+then
+	Config[id]=string.format("%d", tonumber(value))
+elseif BoincSettingIsNumeric(id)
+then
+	Config[id]=string.format("%0.3f", tonumber(value))
+else 
+	Config[id]=value
+end
+end
+
+
+
+function BoincUpdateClientConfig(Config)
+local P, items, name, value
+
+P=BoincTransaction("<boinc_gui_rpc_request>\n<get_cc_config/>\n</boinc_gui_rpc_request>\n\003",false, "Get Client Config")
+items=P:open("/boinc_gui_rpc_reply")
+if items ~= nil
+then
+	item=items:first()
+	while item ~= nil
+	do
+		BoincParseSetting(Config, "cc:", item:name(), item:value())
+		item=items:next()
+	end
+end
+
+
+P=BoincTransaction("<boinc_gui_rpc_request>\n<get_global_prefs_working/>\n</boinc_gui_rpc_request>\n\003",false, "Get Global Preferences")
+items=P:open("/boinc_gui_rpc_reply/global_preferences")
+if items ~= nil
+then
+item=items:first()
+while item ~= nil
+do
+	BoincParseSetting(Config, "prefs:", item:name(), item:value())
+	item=items:next()
+end
+end
+
+end
+
+
+
+
+
+
+function BoincSettingDisplayModifyScreen(Config, name)
+local value
+
+Out:clear()
+Out:move(0,1)
+Out:puts("Modify value: ~e~b"..name.."~0\n")
+Out:puts("Description: ~e~b".. BoincSettingGetDescription(name) .."~0\n\n")
+Out:puts("Current Value: "..Config[name].."\n")
+value=Out:prompt("Enter new Value: ")
+
+Config[name]=value
+end
+
+
+function BoincSettingGetName(setting)
+local tokens
+
+tokens=strutil.TOKENIZER(setting, ":")
+
+--throw away first token
+tokens:next()
+return( string.gsub(tokens:next(), "_", " "))
+end
+
+
+function BoincConfigScreenRefresh()
+Out:clear()
+Out:move(0,0)
+Out:puts("Configure boinc@"..boinc_host.."~0\n")
+Out:puts(" Some settings may require restarting boinc to take effect\n")
+Out:puts(" ~rDon't forget to select SAVE CONFIG at the bottom of the menu~0\n")
+Out:bar("esc:back  up/down:select item   enter:modify", "fcolor=blue bcolor=cyan")
+end
+
+
+function BoincSettingModify(Config, name)
+
+if BoincSettingIsBoolean(name)==true
+then
+	if ToBoolean(Config[name])=="true"
+	then
+		Config[name]="false"
+	else
+		Config[name]="true"
+	end
+else
+	BoincSettingDisplayModifyScreen(Config, name)
+	BoincConfigScreenRefresh()
+end
+
+end
+
+
+function DisplayBoincConfigRunMenu(Menu)
+local Selected=nil
+local ch, curr, str
+
+while Selected == nil
+do
+	ch=Out:getc()
+	if ch=="ESC" then break end
+	Selected=Menu:onkey(ch)
+
+	-- check this feature exists before trying to use it, earlier versions of
+	-- libUseful-lua don't have this
+	if Menu.curr ~= nil
+	then
+		curr=Menu:curr()
+		if curr ~= nil 
+		then
+			Out:move(1, Out:length()-3)
+			Out:puts(BoincSettingGetDescription(curr).."~>")
+		end
+	end
+
+end
+
+return Selected
+end
+
+
+function DisplayBoincConfigScreen()
+local Menu, P, name, value, pos
+local Config={} 
+local Sorted={}
+local Selected=""
+
+for name, value in pairs(boinc_settings)
+do
+Config[name]="false"
+end
+
+BoincUpdateClientConfig(Config)
+for name, value in pairs(Config)
+do
+	table.insert(Sorted, name)
+end
+
+table.sort(Sorted)
+
+BoincConfigScreenRefresh()
+while Selected ~= nil
+do
+Menu=terminal.TERMMENU(Out, 1, 4, Out:width() -2, Out:length()-9)
+for pos, name in pairs(Sorted)
+do
+	if BoincSettingIsIgnored(name) == false
+	then
+	value=Config[name]
+	Menu:add(string.format("% 30s:  %s", BoincSettingGetName(name), value), name)
+	end
+end
+
+Menu:add("SAVE CONFIG - push changes to boinc", "save")
+
+Menu:draw()
+Selected=DisplayBoincConfigRunMenu(Menu)
+
+if Selected ~= nil
+then
+if Selected=="save"
+then
+	BoincSetClientConfig(Config)
+	BoincSetGlobalPrefs(Config)
+	break
+else 
+	BoincSettingModify(Config, Selected)
+end
+end
+end
+
+end
+
 
 
 
@@ -554,7 +864,7 @@ if Selected=="final" then op="project_detach_when_done" end
 
 S=stream.STREAM(boinc_host)
 str="<boinc_gui_rpc_request>\n<" .. op .. ">\n  <project_url>" ..  proj.url .. "</project_url>\n</"..op..">\n</boinc_gui_rpc_request>\n\003"
-if BoincTransaction(str)
+if BoincTransaction(str, true, Selected .. " project")
 then
 	if Selected=="pause" then proj.state="suspend" end
 	if Selected=="resume" then proj.state="active" end
@@ -627,6 +937,7 @@ local Menu, Selected
 local ProjectsAltered=false
 
 DisplayProjectDetails(proj)
+Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
 
 Menu=terminal.TERMMENU(Out, 1, 15, Out:width() -2, Out:length()-17)
 Menu:add("update  - connect to project server", "update")
@@ -671,13 +982,13 @@ local str, name
 	projects=SortTable(unsort_projects, ProjectsSort)
 
 	Out:move(1,8)
-	Out:puts(" Control   [~eProjects~0]    Tasks     Settings")
+	Out:puts("  Control  [~eProjects~0]  Tasks    Log   ")
 	Out:move(1,9)
 	
 	str=string.format("  %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
 	if Out:width() > 82
 	then
-		str=str..string.format("  % 10s  % 10s", "cred/hour", "cred/min")
+		str=str..string.format(" %7s  % 10s  % 10s", "disk use", "cred/hour", "cred/min")
 	end
 	Out:puts(str.."\n")
 
@@ -702,6 +1013,7 @@ local str, name
 
 		if Out:width() > 82 
 		then
+				str=str..string.format("   %6s", strutil.toMetric(proj.disk_usage))
 				if proj.time > 0
 				then
 				str=str..string.format("  % 8.2f  % 8.2f", proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time)
@@ -727,7 +1039,7 @@ then
 
 	str="<boinc_gui_rpc_request>\n<" .. op .. ">\n  <project_url>" ..  task.url .. "</project_url>\n<name>" .. task.name .. "</name></"..op..">\n</boinc_gui_rpc_request>\n\003"
 
-	if BoincTransaction(str)
+	if BoincTransaction(str, true, op)
 	then
 			if op=="abort_result" then Selected="exit"
 			elseif op=="suspend_result" then task.state="pause"
@@ -762,6 +1074,8 @@ do
 	Out:puts("Slot:".. task.slot .. "  Pid:" .. task.pid .. "\n")
 	Out:puts(string.format("Progress: %0.2f%%   Time: %s  Remain: %s\n", task.progress * 100, FormatTime(task.cpu_time), FormatTime(task.remain_time)))
 	Out:puts("Received: " .. time.formatsecs("%Y/%m/%d %H:%M:%S", task.received) .. "  Deadline: " .. time.formatsecs("%Y/%m/%d %H:%M:%S", task.deadline) .. "\n")
+
+	Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
 	
 	Menu=terminal.TERMMENU(Out, 1, 8, Out:width() - 2, 10)
 	if task.state=="run"
@@ -788,7 +1102,7 @@ local tasks={}
 
 	tasks=SortTable(unsort_tasks, TasksSort)
 	Out:move(1,8)
-	Out:puts(" Control   Projects    [~eTasks~0]    Settings")
+	Out:puts("  Control   Projects  [~eTasks~0]   Log    ")
 	Out:move(1,9)
 	Out:puts(string.format("  %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due"))
 	for i,task in pairs(tasks)
@@ -806,22 +1120,30 @@ end
 
 
 
-function SettingsMenu(Menu, settings)
-local Selected
+function LogMenu(Menu)
+local P, item, str, when
 
+	--tasks=SortTable(unsort_tasks, TasksSort)
 	Out:move(1,8)
-	Out:puts(" Control   Projects     Tasks    [~eSettings~0]")
+	Out:puts("  Control   Projects   Tasks   [~eLog~0]   ")
 	Out:move(1,9)
-	Out:puts("~rSettings cannot be changed via this app... yet~0")
-	Menu:add(string.format("% 20s %-40s", "run when user active:", settings.run_user_active), "run_user_active")
-	Menu:add(string.format("% 20s %-40s", "run on batteries    :", settings.run_on_batteries), "run_on_batteries")
-	Menu:add(string.format("% 20s %-40s", "min battery percent :", settings.battery_min_charge), "battery_min_charge")
-	Menu:add(string.format("% 20s %-40s", "suspend on cpu busy :", settings.suspend_cpu_usage), "suspend_cpu_usage")
-	Menu:add(string.format("% 20s %-40s", "max virt.mem percent:", settings.max_vm_percent), "max_vm_percent")
-	Menu:add(string.format("% 20s %-40s", "max virt.mem percent:", settings.max_ram_busy_percent), "max_ram_busy_percent")
-	Menu:add(string.format("% 20s %-40s", "max virt.mem percent:", settings.max_ram_idle_percent), "max_ram_idle_percent")
+
+	if g_Logs==nil then g_Logs=GetLogs() end
+
+	item=g_Logs:first()
+	while item ~= nil
+	do
+		str=strutil.stripTrailingWhitespace(item:value("body"))
+		str=strutil.stripLeadingWhitespace(str)
+		when=time.formatsecs("%Y/%m/%d %H:%M:%S  ", tonumber(item:value("time"))) 
+		str=string.format("%s %20s   %s", when, item:value("project"), str)
+		Menu:add(string.sub(str, 1, Out:width() -8))
+	item=g_Logs:next()
+	end
+
 	Menu:add("exit app", "exit")
 
+	return true
 end
 
 
@@ -830,10 +1152,11 @@ function ControlMenu(Menu)
 local Selected
 
 	Out:move(1,8)
-	Out:puts(" [~eControl~0]   Projects     Tasks     Settings ")
+	Out:puts(" [~eControl~0]  Projects   Tasks    Log    ")
+	Menu:add("configure", "configure")
+	Menu:add("contact servers (tell boinc network is available)", "network_available")
 	Menu:add("update account manager", "update_acct_mgr")
 	Menu:add("run benchmarks", "benchmark")
-	Menu:add("contact servers (tell boinc network is available)", "network_available")
 	Menu:add("shutdown boinc", "shutdown")
 	Menu:add("exit app", "exit")
 
@@ -844,12 +1167,13 @@ end
 
 function DisplayHostBanner(state)
 Out:move(0, 0)
-Out:puts("Host: ~e".. state.host.name .. "~0 ~c(" .. state.host.ip .. ")~0   ".. state.host.os .. " - " .. state.host.os_version.. "\n")
-Out:puts("CPU: " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
-Out:puts("OPS/s:  integer:" .. strutil.toMetric(state.host.iops, 2) .. "   floating-point:" .. strutil.toMetric(state.host.fpops, 2) .. "\n")
-Out:puts("MEM: " .. strutil.toMetric(state.host.mem)  .. "\n")
-Out:puts("Boinc Version: ".. state.host.client_version .."\n")
-if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 then Out:puts("Account Manager: ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") end
+Out:puts("~mHost:~0 ~e".. state.host.name .. "~0 ~c(" .. state.host.ip .. ")~0   ".. state.host.os .. " - " .. state.host.os_version.. "\n")
+Out:puts("~mCPU:~0 " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
+Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(state.host.iops, 2) .. "   ~cfloating-point:~0 " .. strutil.toMetric(state.host.fpops, 2) .. "\n")
+Out:puts("~mMEM:~0 " .. strutil.toMetric(state.host.mem)  .. "\n")
+Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(state.disk_usage) .. "\n")
+Out:puts("~mBoinc Version:~0 ".. state.host.client_version .."\n")
+if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 then Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") end
 
 end
 
@@ -860,13 +1184,13 @@ function MenuDisplayHostReload(Menu, display_state, boinc_state)
 Out:clear()
 DisplayHostBanner(boinc_state)
 Menu:clear()
-if display_state==3
+if display_state==DISPLAY_LOGS
 then
-	SettingsMenu(Menu, boinc_state.settings)
-elseif display_state==2
+	LogMenu(Menu)
+elseif display_state==DISPLAY_TASKS
 then
 	TasksMenu(Menu, boinc_state.tasks)
-elseif display_state==1
+elseif display_state==DISPLAY_PROJECTS
 then
 	AttachedProjectsMenu(Menu, boinc_state.projects)
 else
@@ -875,7 +1199,7 @@ end
 
 Menu:draw()
 
-Out:bar("q:exit app    left/right:select menu page    up/down/enter:select menu item   u:update")
+Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
 end
 
 
@@ -888,7 +1212,7 @@ local projects, sorted, url, proj, Selected
 local wid, len
 
 Out:clear()
-Out:bar("up/down/enter:select menu item   esc:back")
+Out:bar("up/down/enter:select menu item   esc:back", "fcolor=white bcolor=blue")
 Out:move(0,0)
 Out:puts("~B~wSELECT PROJECT~>~0\n")
 projects=BoincGetProjectList()
@@ -929,6 +1253,7 @@ do
 	elseif ch == "u"
 	then
 		boinc_state=BoincGetState()
+		if display_state==DISPLAY_LOGS then GetLogs() end
 		MenuDisplayHostReload(Menu, display_state, boinc_state)
 	elseif ch=="LEFT" 
 	then 
@@ -938,7 +1263,7 @@ do
 	elseif ch=="RIGHT" 
 	then 
 		display_state=display_state + 1
-		if display_state > 3 then display_state=3 end
+		if display_state > 4 then display_state=4 end
 		MenuDisplayHostReload(Menu, display_state, boinc_state)
 	end
 	
@@ -1038,15 +1363,11 @@ end
 
 function ProcessControl(Selected)
 
-Out:clear()
-Out:move(0,2)
 if Selected=="shutdown"
 then
-	Out:puts("~yShutting down boinc~0\n")
 	if BoincShutdown() then return "exit" end
 elseif Selected=="update_acct_mgr"
 then
-	Out:puts("~yRequest account manager sync~0\n")
 	BoincAcctMgrSync()
 elseif Selected=="benchmark"
 then
@@ -1054,6 +1375,9 @@ then
 elseif Selected=="network_available"
 then
 	BoincNetworkAvailable()
+elseif Selected=="configure"
+then
+	DisplayBoincConfigScreen()
 end
 
 return ""
@@ -1075,6 +1399,7 @@ function JoinProjectScreen()
 		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
 	end
 end
+
 
 
 
@@ -1117,7 +1442,7 @@ end
 if boinc_state ~= nil
 then
 
-Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, 10)
+Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
 while true
 do
 	MenuDisplayHostReload(Menu, display_state, boinc_state)
@@ -1130,10 +1455,10 @@ do
 	then
 		JoinProjectScreen()
 	else
-		if display_state==1
+		if display_state==DISPLAY_PROJECTS
 		then
 			DisplayProject(boinc_state.projects[Selected])
-		elseif display_state==2
+		elseif display_state==DISPLAY_TASKS
 		then
 			DisplayTask(boinc_state.tasks[Selected])
 		else
@@ -1142,7 +1467,7 @@ do
 		end
 	end
 
-	boinc_state=BoincGetState()
+--	boinc_state=BoincGetState()
 	MenuDisplayHostReload(Menu, display_state, boinc_state)
 end
 
@@ -1279,11 +1604,18 @@ end
 end
 
 
+function BoincMgrAddSetting(name, dtype, description)
+local setting={}
+
+setting.name=name
+setting.dtype=dtype
+setting.description=description
+boinc_settings[setting.name]=setting
+end
 
 
--- MAIN STARTS HERE --
-
---process.lu_set("HTTP:Debug","y");
+function BoincMgrInit()
+local tempstr
 
 tempstr=process.getenv("BOINC_USERNAME")
 if strutil.strlen(tempstr) > 0 then acct_username=tempstr end
@@ -1293,6 +1625,67 @@ tempstr=process.getenv("BOINC_PASSWORD")
 if strutil.strlen(tempstr) > 0 then acct_pass=tempstr end
 
 hosts.size=0
+
+BoincMgrAddSetting("cc:abort_jobs_on_exit", "bool", "If boinc shuts down then throw away current tasks")
+BoincMgrAddSetting("cc:allow_multiple_clients", "bool", "Allow multiple boinc clients on one machine")
+BoincMgrAddSetting("cc:allow_remote_gui_rpc", "bool", "Allow RPC from hosts other than localhost")
+BoincMgrAddSetting("cc:fetch_minimal_work", "bool", "Get one job per device")
+BoincMgrAddSetting("cc:fetch_on_update", "bool", "Fetch work when updating")
+BoincMgrAddSetting("cc:report_results_immediately", "bool", "Send results as soon as computed")
+BoincMgrAddSetting("cc:suppress_net_info", "bool", "Don't send ip details to servers")
+BoincMgrAddSetting("prefs:run_on_batteries", "bool", "Option for laptops: run boinc tasks even when on batteries")
+BoincMgrAddSetting("prefs:run_if_user_active", "bool", "Run boinc tasks even if computer is being used")
+BoincMgrAddSetting("prefs:run_gpu_if_user_active", "bool", "Use GPU (if supported) even when computer is being used")
+BoincMgrAddSetting("prefs:suspend_if_no_recent_input", "bool", "Suspend work if no recent user mouse/keyboard activity. Allows system to go into powersave.")
+BoincMgrAddSetting("prefs:leave_apps_in_memory", "bool", "Don't swap apps out of memory when prempted by kernel.")
+--BoincMgrAddSetting("cc:skip_cpu_benchmarks", "bool", "")
+BoincMgrAddSetting("cc:skip_cpu_benchmarks", "ignore", "")
+--BoincMgrAddSetting("cc:exit_when_idle", "bool", "")
+BoincMgrAddSetting("cc:exit_when_idle", "ignore", "")
+--BoincMgrAddSetting("prefs:dont_verify_images", "bool", "")
+BoincMgrAddSetting("prefs:dont_verify_images", "ignore", "")
+--BoincMgrAddSetting("prefs:confirm_before_connecting", "bool", "")
+BoincMgrAddSetting("prefs:confirm_before_connecting", "ignore", "")
+BoincMgrAddSetting("prefs:hangup_if_dialed", "bool", "")
+BoincMgrAddSetting("prefs:network_wifi_only", "bool", "")
+BoincMgrAddSetting("prefs:disk_min_free_gb", "num", "Leave at least this much disk free")
+BoincMgrAddSetting("prefs:disk_max_used_gb", "num", "Max diskspace to use in Gigabytes")
+BoincMgrAddSetting("prefs:disk_max_used_pct", "num", "Max percent of diskspace to use")
+BoincMgrAddSetting("prefs:vm_max_used_pct", "num", "Max percent of virtual memory (including swap) to use")
+BoincMgrAddSetting("prefs:idle_time_to_run", "num", "Wait for system idle this many minutes before running boinc tasks")
+BoincMgrAddSetting("prefs:max_ncpus_pct", "num", "Percent of cpus to use")
+BoincMgrAddSetting("prefs:daily_xfer_limit_mb", "num", "Max per-day data transfer in megabytes")
+BoincMgrAddSetting("prefs:ram_max_used_busy_pct", "num", "Percent of ram to use when system is in use")
+BoincMgrAddSetting("prefs:ram_max_used_idle_pct", "num", "Percent of ram to use when system is idle")
+BoincMgrAddSetting("prefs:battery_charge_min_pct", "num", "Stop tasks if laptop battery percent charge is lower than this")
+BoincMgrAddSetting("prefs:battery_max_temperature", "num", "Stop tasks if laptop battery gets hotter than this")
+BoincMgrAddSetting("prefs:cpu_usage_limit", "num", "Max percent cpu to use")
+BoincMgrAddSetting("prefs:suspend_cpu_usage", "num", "Suspend tasks if non boinc processes use over this much cpu")
+BoincMgrAddSetting("prefs:cpu_scheduling_period_minutes", "num", "Minutes to run a project for before switching to another")
+BoincMgrAddSetting("prefs:disk_interval", "num", "Seconds between writing task state to disk. Minimum is 60 seconds. No maximum.")
+BoincMgrAddSetting("prefs:max_bytes_sec_up", "num", "Upload speed for workunit/application transfers")
+BoincMgrAddSetting("prefs:max_bytes_sec_down", "num", "Download speed for workunit/application transfers")
+BoincMgrAddSetting("prefs:work_buf_min_days", "num", "Download work to last at least this many days")
+BoincMgrAddSetting("prefs:work_buf_additional_days", "num", "Download additional work for this many days")
+BoincMgrAddSetting("prefs:start_hour", "int", "Run tasks only after this hour to 'end hour'")
+BoincMgrAddSetting("prefs:end_hour", "int", "Run tasks only before this hour from 'start hour'")
+BoincMgrAddSetting("prefs:net_start_hour", "int", "Do upload/download only after this hour to 'net end hour'")
+BoincMgrAddSetting("prefs:net_end_hour", "int", "Do upload/download only before this hour from 'net start hour'")
+
+
+BoincMgrAddSetting("prefs:override_file_present", "ignore", "")
+BoincMgrAddSetting("prefs:mod_time", "ignore", "")
+BoincMgrAddSetting("prefs:source_project", "ignore", "")
+end
+
+
+
+
+
+-- MAIN STARTS HERE --
+
+--process.lu_set("HTTP:Debug","y");
+BoincMgrInit()
 
 ParseCmdLine(arg)
 
