@@ -24,7 +24,7 @@ OR use the -user, -email and -pass command-line arguments that override other me
 acct_username=""
 acct_email=""
 acct_pass=""
-
+acct_mgr=""
 
 -- gui key can be set here if you only connect to one boinc instance. Otherwise you can set the key with
 -- the '-key' command-line argument, and save it with the '-save' option.
@@ -373,10 +373,12 @@ do
 	S:writeln("<boinc_gui_rpc_request>\n<lookup_account_poll/>\n</boinc_gui_rpc_request>\n\003")
 	str=S:readto("\003")
 	P=dataparser.PARSER("xml", str)
-	print("errno: ".. P:value("/boinc_gui_rpc_reply/account_out/error_num"))
-	if P:value("/boinc_gui_rpc_reply/account_out/error_num") ~= "-204" then break end
+	result=P:value("/boinc_gui_rpc_reply/account_out/error_num")
+	if result ~= "-204" then break end
 	process.sleep(1)
 end
+
+print("errno: "..result)
 
 P=dataparser.PARSER("xml", str)
 str=P:value("/boinc_gui_rpc_reply/account_out/authenticator")
@@ -455,8 +457,42 @@ return(BoincTransaction("<boinc_gui_rpc_request>\n<network_available/>\n</boinc_
 end
 
 
+
 function BoincAcctMgrSync()
 return(BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n  <use_config_file/>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003",true, "Sync with account manager"))
+end
+
+function BoincAcctMgrLeave()
+--send all empty arguments to leave any currently configured account manager
+P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url></url>\n<name></name>\n<password></password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", true, "Leave account manager")
+end
+
+
+function BoincAcctMgrSet(url)
+local S, P, str, result
+
+BoincAcctMgrLeave()
+P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct_username.."</name>\n<password>"..acct_pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
+
+result=BoincRPCResult(P, "Join account manager")
+if result
+then
+S=stream.STREAM(boinc_host)
+BoincRPCAuth(S)
+while true
+do
+	S:writeln("<boinc_gui_rpc_request>\n<acct_mgr_rpc_poll/>\n</boinc_gui_rpc_request>\n\003")
+	str=S:readto("\003")
+	P=dataparser.PARSER("xml", str)
+	result=P:value("/boinc_gui_rpc_reply/acct_mgr_rpc_reply/error_num")
+	if result ~= "-204" then break end
+	process.sleep(1)
+end
+
+print("result: [".. result.."]")
+S:close()
+end
+
 end
 
 
@@ -851,6 +887,7 @@ end
 function BoincProjectOperation(Selected, proj)
 local op, str, S
 
+if strutil.strlen(Selected) == 0 then Selected="exit" end
 if Selected=="exit" then return end
 
 if Selected=="update" then op="project_update" end
@@ -862,6 +899,8 @@ if Selected=="more" then op="project_allowmorework" end
 if Selected=="detach" then op="project_detach" end
 if Selected=="final" then op="project_detach_when_done" end
 
+if op ~= nil
+then
 S=stream.STREAM(boinc_host)
 str="<boinc_gui_rpc_request>\n<" .. op .. ">\n  <project_url>" ..  proj.url .. "</project_url>\n</"..op..">\n</boinc_gui_rpc_request>\n\003"
 if BoincTransaction(str, true, Selected .. " project")
@@ -871,8 +910,8 @@ then
 	if Selected=="finish" then proj.state="nomore" end
 	if Selected=="more" then proj.state="active" end
 end
-
 S:close()
+end
 
 end
 
@@ -1173,7 +1212,12 @@ Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(state.host.iops, 2) .. 
 Out:puts("~mMEM:~0 " .. strutil.toMetric(state.host.mem)  .. "\n")
 Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(state.disk_usage) .. "\n")
 Out:puts("~mBoinc Version:~0 ".. state.host.client_version .."\n")
-if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 then Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") end
+if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 
+then 
+	Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") 
+else
+	Out:puts("~mAccount Manager:~0 ~r~enone~0" .."\n") 
+end
 
 end
 
@@ -1442,6 +1486,16 @@ end
 if boinc_state ~= nil
 then
 
+if strutil.strlen(acct_mgr) > 0 
+then
+	if acct_mgr == "none" 
+	then
+	BoincAcctMgrLeave()
+	else
+	BoincAcctMgrSet(acct_mgr)
+	end
+end
+
 Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
 while true
 do
@@ -1559,6 +1613,10 @@ do
 		then
 			i=i+1
 			acct_pass=arg[i]
+		elseif arg[i] == "-acct_mgr"
+		then
+			i=i+1
+			acct_mgr=arg[i]
 		elseif arg[i] == "-save"
 		then
 			save_key="y"

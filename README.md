@@ -16,14 +16,17 @@ host  -  host to connect to. e.g. "tcp:192.168.2.1" or "ssh:myserver"
  
 -save             save the gui-key.
 
+-acct_mgr [url]   Set account manager. This requires -user and -pass for the account manager login.
 
--user             Username. Needed for creating/joining project accounts and other management tasks.
--email            email address. Needed for creating/joining project accounts
--pass             password. Needed for creating/joining project accounts and other management tasks.
+-user  [name]     Username. Needed for creating/joining project accounts and other management tasks.
+-email [email]    email address. Needed for creating/joining project accounts
+-pass  [passwd]   password. Needed for creating/joining project accounts and other management tasks.
 
 ```
 
 Assuming you've used the same user, email and pass for all projects, the user, email, and pass can be set within the program itself, so that they don't need to be passed on the command-line every time. The gui-key can be saved on a per-host basis by using the "-save" option. This will save the key for the current host in "~/.boinc/keys.txt", allowing multiple hosts to be accessed without needing to pass in the key.
+
+If you're using an account manager you can set it by passing the url with the `-acct_mgr` option. This also requires the '-user' and '-pass' options to supply the username and password for the account manager. Once the account manager is set these options do not need to be passed in again, and the username and password are never stored on disk.
 
 Hosts that are accessed via SSH must be configured in the ~/.ssh/config file with an ssh key.
 
