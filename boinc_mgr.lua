@@ -35,11 +35,12 @@ server_url=""
 boinc_host="tcp:127.0.0.1:"..default_port
 boinc_dir=process.homeDir().."/.boinc"
 save_key="n"
-hosts={}
+menu_tabbar=""
 
+hosts={}
 boinc_settings={} 
 
-
+MainMenu=nil
 
 function ToBoolean(val)
 
@@ -800,6 +801,7 @@ end
 end
 
 
+
 function DisplayBoincConfigRunMenu(Menu)
 local Selected=nil
 local ch, curr, str
@@ -1001,10 +1003,15 @@ Menu:add("exit    - exit menu", "exit")
 
 while Selected ~= "exit"
 do
-Selected=Menu:run()
-if Selected ~= "exit" then ProjectsAltered=true end
-BoincProjectOperation(Selected, proj)
-DisplayProjectDetails(proj)
+	Selected=Menu:run()
+	if Selected == nil then Selected="exit" end
+	if Selected ~= "exit" 
+	then 
+		ProjectsAltered=true 
+		break
+	end
+	BoincProjectOperation(Selected, proj)
+	DisplayProjectDetails(proj)
 end
 
 return ProjectsAltered
@@ -1013,61 +1020,12 @@ end
 
 
 
-function AttachedProjectsMenu(Menu, unsort_projects)
-local Selected, i, proj
-local projects={}
-local str, name
-
-	projects=SortTable(unsort_projects, ProjectsSort)
-
-	Out:move(1,8)
-	Out:puts("  Control  [~eProjects~0]  Tasks    Log   ")
-	Out:move(1,9)
-	
-	str=string.format("  %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
-	if Out:width() > 82
-	then
-		str=str..string.format(" %7s  % 10s  % 10s", "disk use", "cred/hour", "cred/min")
-	end
-	Out:puts(str.."\n")
-
-	Menu:add("[add new project]", "new_project")
-	for i,proj in pairs(projects)
-	do
-		if proj.jobs_active ==0 and (proj.state=="nomore" or proj.state=="suspend")
-		then 
-			active="PAUSED"
-		else
-			active=string.format("%6d", proj.jobs_active)
-		end
-
-		if strutil.strlen(proj.name)==0
-		then
-		name="** ADDING **"
-		else
-		name=string.sub(proj.name, 1, 20)
-		end
-
-		str=string.format("%20s % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
-
-		if Out:width() > 82 
-		then
-				str=str..string.format("   %6s", strutil.toMetric(proj.disk_usage))
-				if proj.time > 0
-				then
-				str=str..string.format("  % 8.2f  % 8.2f", proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time)
-				end
-		end
-		
-		Menu:add(str, proj.url)
-	end
-	Menu:add("exit app", "exit")
-end
-
 
 
 function BoincTaskOperation(Selected, task)
 local op, str
+
+if Selected == nil then Selected="exit" end
 
 if Selected ~= "exit" 
 then
@@ -1097,7 +1055,7 @@ local Menu, i
 local Selected=""
 
 
-while Selected ~= "exit"
+while true
 do
 	Out:clear()
 	Out:move(0,0)
@@ -1128,6 +1086,8 @@ do
 	Menu:add("exit    - exit menu", "exit")
 	
 	Selected=Menu:run()
+	if Selected == nil then Selected="exit" end
+	if Selected=="exit" then break end
 	Selected=BoincTaskOperation(Selected, task)
 end
 
@@ -1135,116 +1095,7 @@ end
 
 
 
-function TasksMenu(Menu, unsort_tasks)
-local Selected, i, task, due
-local tasks={}
 
-	tasks=SortTable(unsort_tasks, TasksSort)
-	Out:move(1,8)
-	Out:puts("  Control   Projects  [~eTasks~0]   Log    ")
-	Out:move(1,9)
-	Out:puts(string.format("  %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due"))
-	for i,task in pairs(tasks)
-	do
-		if task.slot > -1
-		then
-			due=time.formatsecs("%y/%m/%d", task.deadline)
-			Menu:add(string.format("%04d % 20s %6s % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
-		end
-	end
-	Menu:add("exit app", "exit")
-
-	return true
-end
-
-
-
-function LogMenu(Menu)
-local P, item, str, when
-
-	--tasks=SortTable(unsort_tasks, TasksSort)
-	Out:move(1,8)
-	Out:puts("  Control   Projects   Tasks   [~eLog~0]   ")
-	Out:move(1,9)
-
-	if g_Logs==nil then g_Logs=GetLogs() end
-
-	item=g_Logs:first()
-	while item ~= nil
-	do
-		str=strutil.stripTrailingWhitespace(item:value("body"))
-		str=strutil.stripLeadingWhitespace(str)
-		when=time.formatsecs("%Y/%m/%d %H:%M:%S  ", tonumber(item:value("time"))) 
-		str=string.format("%s %20s   %s", when, item:value("project"), str)
-		Menu:add(string.sub(str, 1, Out:width() -8))
-	item=g_Logs:next()
-	end
-
-	Menu:add("exit app", "exit")
-
-	return true
-end
-
-
-
-function ControlMenu(Menu)
-local Selected
-
-	Out:move(1,8)
-	Out:puts(" [~eControl~0]  Projects   Tasks    Log    ")
-	Menu:add("configure", "configure")
-	Menu:add("contact servers (tell boinc network is available)", "network_available")
-	Menu:add("update account manager", "update_acct_mgr")
-	Menu:add("run benchmarks", "benchmark")
-	Menu:add("shutdown boinc", "shutdown")
-	Menu:add("exit app", "exit")
-
-end
-
-
-
-
-function DisplayHostBanner(state)
-Out:move(0, 0)
-Out:puts("~mHost:~0 ~e".. state.host.name .. "~0 ~c(" .. state.host.ip .. ")~0   ".. state.host.os .. " - " .. state.host.os_version.. "\n")
-Out:puts("~mCPU:~0 " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
-Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(state.host.iops, 2) .. "   ~cfloating-point:~0 " .. strutil.toMetric(state.host.fpops, 2) .. "\n")
-Out:puts("~mMEM:~0 " .. strutil.toMetric(state.host.mem)  .. "\n")
-Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(state.disk_usage) .. "\n")
-Out:puts("~mBoinc Version:~0 ".. state.host.client_version .."\n")
-if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 
-then 
-	Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") 
-else
-	Out:puts("~mAccount Manager:~0 ~r~enone~0" .."\n") 
-end
-
-end
-
-
-
-function MenuDisplayHostReload(Menu, display_state, boinc_state)
-
-Out:clear()
-DisplayHostBanner(boinc_state)
-Menu:clear()
-if display_state==DISPLAY_LOGS
-then
-	LogMenu(Menu)
-elseif display_state==DISPLAY_TASKS
-then
-	TasksMenu(Menu, boinc_state.tasks)
-elseif display_state==DISPLAY_PROJECTS
-then
-	AttachedProjectsMenu(Menu, boinc_state.projects)
-else
-	ControlMenu(Menu)
-end
-
-Menu:draw()
-
-Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
-end
 
 
 
@@ -1282,40 +1133,6 @@ end
 
 
 
-
-
-function DisplayHostProcessMenu(Menu, display_state, boinc_state)
-local ch
-
-while true
-do
-	ch=Out:getc()
-
-	if ch=="q" 
-	then 
-		return "exit", display_state 
-	elseif ch == "u"
-	then
-		boinc_state=BoincGetState()
-		if display_state==DISPLAY_LOGS then GetLogs() end
-		MenuDisplayHostReload(Menu, display_state, boinc_state)
-	elseif ch=="LEFT" 
-	then 
-		display_state=display_state - 1
-		if display_state < 0 then display_state=0 end
-		MenuDisplayHostReload(Menu, display_state, boinc_state)
-	elseif ch=="RIGHT" 
-	then 
-		display_state=display_state + 1
-		if display_state > 4 then display_state=4 end
-		MenuDisplayHostReload(Menu, display_state, boinc_state)
-	end
-	
-	Selected=Menu:onkey(ch)
-	if Selected ~= nil then return Selected, display_state end
-end
-
-end
 
 
 
@@ -1447,8 +1264,231 @@ end
 
 
 
+
+function DisplayHostBanner(state)
+Out:move(0, 0)
+Out:puts("~mHost:~0 ~e".. state.host.name .. "~0 ~c(" .. state.host.ip .. ")~0   ".. state.host.os .. " - " .. state.host.os_version.. "\n")
+Out:puts("~mCPU:~0 " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
+Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(state.host.iops, 2) .. "   ~cfloating-point:~0 " .. strutil.toMetric(state.host.fpops, 2) .. "\n")
+Out:puts("~mMEM:~0 " .. strutil.toMetric(state.host.mem)  .. "\n")
+Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(state.disk_usage) .. "\n")
+Out:puts("~mBoinc Version:~0 ".. state.host.client_version .."\n")
+if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 
+then 
+	Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") 
+else
+	Out:puts("~mAccount Manager:~0 ~r~enone~0" .."\n") 
+end
+
+end
+
+
+-- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuSwitch and it's subfunctions)
+-- but pushes all the data out to the display
+function ScreenRefresh(Menu, display_state, boinc_state)
+
+Out:cork()
+Out:clear()
+DisplayHostBanner(boinc_state)
+Out:move(1,8)
+Out:puts(menu_tabbar)
+Menu:draw()
+
+Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
+Out:flush()
+end
+
+
+-- load main control options menu
+function ControlMenu(Menu)
+local Selected
+
+	menu_tabbar=" [~eControl~0]  Projects   Tasks    Log    "
+	Menu:add("configure", "configure")
+	Menu:add("contact servers (tell boinc network is available)", "network_available")
+	Menu:add("update account manager", "update_acct_mgr")
+	Menu:add("run benchmarks", "benchmark")
+	Menu:add("shutdown boinc", "shutdown")
+	Menu:add("exit app", "exit")
+end
+
+
+
+-- load up log messages from boinc, ready to be displayed
+function LogMenu(Menu)
+local P, item, str, when
+
+	--tasks=SortTable(unsort_tasks, TasksSort)
+	menu_tabbar="  Control   Projects   Tasks   [~eLog~0]   "
+
+	if g_Logs==nil then g_Logs=GetLogs() end
+
+	item=g_Logs:first()
+	while item ~= nil
+	do
+		str=strutil.stripTrailingWhitespace(item:value("body"))
+		str=strutil.stripLeadingWhitespace(str)
+		when=time.formatsecs("%Y/%m/%d %H:%M:%S  ", tonumber(item:value("time"))) 
+		str=string.format("%s %20s   %s", when, item:value("project"), str)
+		Menu:add(string.sub(str, 1, Out:width() -8))
+	item=g_Logs:next()
+	end
+
+	Menu:add("exit app", "exit")
+
+	return true
+end
+
+
+-- load up details of running tasks ready to be displayed
+function TasksMenu(Menu, unsort_tasks)
+local Selected, i, task, due
+local tasks={}
+
+	tasks=SortTable(unsort_tasks, TasksSort)
+	menu_tabbar="  Control   Projects  [~eTasks~0]   Log    "
+	menu_tabbar=menu_tabbar..string.format("\n   %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due")
+	for i,task in pairs(tasks)
+	do
+		if task.slot > -1
+		then
+			due=time.formatsecs("%y/%m/%d", task.deadline)
+			Menu:add(string.format("%04d % 20s %6s % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
+		end
+	end
+	Menu:add("exit app", "exit")
+
+	return true
+end
+
+
+
+-- load up details of attatched projects ready to be displayed
+function AttachedProjectsMenu(Menu, unsort_projects)
+local Selected, i, proj
+local projects={}
+local str, name
+
+	projects=SortTable(unsort_projects, ProjectsSort)
+
+	menu_tabbar="  Control  [~eProjects~0]  Tasks    Log   "
+	
+	str=string.format("\n   %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
+	if Out:width() > 82
+	then
+		str=str..string.format(" %7s  % 10s  % 10s", "disk use", "cred/hour", "cred/min")
+	end
+	menu_tabbar=menu_tabbar..str
+
+	Menu:add("[add new project]", "new_project")
+	for i,proj in pairs(projects)
+	do
+		if proj.jobs_active ==0 and (proj.state=="nomore" or proj.state=="suspend")
+		then 
+			active="PAUSED"
+		else
+			active=string.format("%6d", proj.jobs_active)
+		end
+
+		if strutil.strlen(proj.name)==0
+		then
+		name="** ADDING **   " .. proj.url
+		else
+		name=string.sub(proj.name, 1, 20)
+
+		str=string.format("%20s % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+
+		if Out:width() > 82 
+		then
+				str=str..string.format("   %6s", strutil.toMetric(proj.disk_usage))
+				if proj.time > 0
+				then
+				str=str..string.format("  % 8.2f  % 8.2f", proj.host_credit * 3600 / proj.time, proj.host_credit * 60 / proj.time)
+				end
+		end
+		end
+		
+		Menu:add(str, proj.url)
+	end
+	Menu:add("exit app", "exit")
+end
+
+
+-- when we switch between menus we need to rebuild them (i.e. load their details into the Menu object)
+function MenuSwitch(display_state, boinc_state)
+
+Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
+Menu:clear()
+io.stderr:write("ms: "..tostring(display_state).."\n")
+if display_state==DISPLAY_LOGS
+then
+	LogMenu(Menu)
+elseif display_state==DISPLAY_TASKS
+then
+	TasksMenu(Menu, boinc_state.tasks)
+elseif display_state==DISPLAY_PROJECTS
+then
+	AttachedProjectsMenu(Menu, boinc_state.projects)
+else
+	ControlMenu(Menu)
+end
+
+return Menu
+end
+
+
+-- Read input from the user to select items from the menus, 
+-- or switch between the menus
+function DisplayHostProcessMenu(display_state, boinc_state)
+local ch, Selected
+
+while true
+do
+	-- if we get a SIGWINCH signal, it means the screen has changed size, and we have to rebuild the menu
+	-- to fit the new width/height of the screen
+	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuSwitch(display_state, boinc_state) end
+
+	-- refresh the screen, doesn't change any details, just pushes the current screen to the terminal
+	ScreenRefresh(MainMenu, display_state, boinc_state)
+
+	--watch for a SIGWINCH (window size changed) signal
+	process.sigwatch(process.SIGWINCH)
+
+	-- read a character from the user and act on it
+	ch=Out:getc()
+	if ch=="q" 
+	then 
+		return "exit", display_state 
+	elseif ch == "u"
+	then
+		boinc_state=BoincGetState()
+		if display_state==DISPLAY_LOGS then GetLogs() end
+	elseif ch=="LEFT" 
+	then 
+		display_state=display_state - 1
+		if display_state < 0 then display_state=0 end
+		MainMenu=MenuSwitch(display_state, boinc_state)
+	elseif ch=="RIGHT" 
+	then 
+		display_state=display_state + 1
+		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
+		MainMenu=MenuSwitch(display_state, boinc_state)
+	elseif ch ~= ""
+	then
+		Selected=MainMenu:onkey(ch)
+		if Selected ~= nil then return Selected, display_state end
+	end
+	
+end
+
+end
+
+
+
+-- this is the main interactive screen, it displays info on the boinc processes
+-- running on a given host
 function DisplayHost(server_url)
-local Menu, host, projects, tasks, ch, mgr
+local host, projects, tasks, ch, mgr
 local display_state=0
 local boinc_state, result
 
@@ -1496,11 +1536,11 @@ then
 	end
 end
 
-Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
+--sets us to the default menu
+MainMenu=MenuSwitch(display_state, boinc_state)
 while true
 do
-	MenuDisplayHostReload(Menu, display_state, boinc_state)
-	Selected,display_state=DisplayHostProcessMenu(Menu, display_state, boinc_state)
+	Selected,display_state=DisplayHostProcessMenu(display_state, boinc_state)
 
 	if Selected=="exit" 
 	then 
@@ -1520,9 +1560,6 @@ do
 			if result=="exit" then break end
 		end
 	end
-
---	boinc_state=BoincGetState()
-	MenuDisplayHostReload(Menu, display_state, boinc_state)
 end
 
 Out:clear()
@@ -1536,7 +1573,9 @@ end
 end
 
 
-function SelectHost()
+-- if more than one host has been registered that we can connect to and control
+-- then this function is called and displays the 'select host' menu
+function QueryUserForHost()
 local Menu, name, key
 
 	Out:clear()
@@ -1551,12 +1590,8 @@ local Menu, name, key
 	Menu:add("exit") 
 
 	selected=Menu:run()
-	if strutil.strlen(selected) > 0
-	then
-		if selected=="exit" then return end
-		gui_key=hosts[selected]
-		DisplayHost(selected)
-	end
+	if selected=="exit" then return nil end
+	return selected
 end
 
 
@@ -1653,7 +1688,6 @@ do
 	key=toks:next()
 
 	hosts[host]=key
-	hosts.size=hosts.size+1
 	str=S:readln()
 end
 S:close()
@@ -1681,8 +1715,6 @@ tempstr=process.getenv("BOINC_EMAIL")
 if strutil.strlen(tempstr) > 0 then acct_email=tempstr end
 tempstr=process.getenv("BOINC_PASSWORD")
 if strutil.strlen(tempstr) > 0 then acct_pass=tempstr end
-
-hosts.size=0
 
 BoincMgrAddSetting("cc:abort_jobs_on_exit", "bool", "If boinc shuts down then throw away current tasks")
 BoincMgrAddSetting("cc:allow_multiple_clients", "bool", "Allow multiple boinc clients on one machine")
@@ -1738,6 +1770,28 @@ end
 
 
 
+function SelectHost(server_url)
+local key, str
+local size=0
+
+if strutil.strlen(server_url) > 0 then return net.reformatURL(server_url) end
+
+-- only way to get an accurate table size!
+for key,str in pairs(hosts)
+do
+	size=size+1
+end
+
+
+if size > 1
+then
+	server_url=QueryUserForHost()
+else
+	server_url="tcp://localhost"
+end
+
+return server_url
+end
 
 
 -- MAIN STARTS HERE --
@@ -1751,27 +1805,16 @@ Out=terminal.TERM()
 --Out:hidecursor()
 
 BoincLoadHosts()
+server_url=SelectHost(server_url)
 
-
-if strutil.strlen(server_url) ==0 and hosts.size > 1
-then
-		SelectHost()
-else
-	if strutil.strlen(server_url) ==0 then server_url="tcp://localhost"
-	else server_url=net.reformatURL(server_url)
-	end
-
-	if strutil.strlen(gui_key) ==0 
-	then 
-		gui_key=hosts[server_url] 
-	elseif save_key == "y" 
-	then 
-		SaveGuiKey() 
-	end 
-	DisplayHost(server_url) 
-end
+if strutil.strlen(gui_key) ==0 
+then 
+	gui_key=hosts[server_url] 
+elseif save_key == "y" 
+then 
+	SaveGuiKey() 
+end 
+DisplayHost(server_url) 
 
 Out:reset()
-
-
 

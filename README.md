@@ -1,7 +1,7 @@
 SYNOPSIS
 =========
 
-boinc_mgr.lua is a menu-driven text-mode lua program for managing the boinc client app. It requires libUseful (at least version 4.0) and libUseful-lua (at least version 2.0) to be installed. boinc_mgr.lua can start and stop the boinc client app on local host, can join, attach, and detach from projects, and can start/stop tasks. It can also attach to boinc over tcp, and over tcp-over-ssh.
+boinc_mgr.lua is a menu-driven text-mode lua program for managing the boinc client app. It requires libUseful (at least version 4.0) and libUseful-lua (at least version 2.18) to be installed. boinc_mgr.lua can start and stop the boinc client app on local host, can join, attach, and detach from projects, and can start/stop tasks. It can also attach to boinc over tcp, and over tcp-over-ssh.
 
 USAGE
 =====
