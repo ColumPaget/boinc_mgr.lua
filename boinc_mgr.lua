@@ -778,7 +778,7 @@ Out:clear()
 Out:move(0,0)
 Out:puts("Configure boinc@"..boinc_host.."~0\n")
 Out:puts(" Some settings may require restarting boinc to take effect\n")
-Out:puts(" ~rDon't forget to select SAVE CONFIG at the bottom of the menu~0\n")
+Out:puts(" ~R~wDon't forget to select SAVE CONFIG at the bottom of the menu~0\n")
 Out:bar("esc:back  up/down:select item   enter:modify", "fcolor=blue bcolor=cyan")
 end
 
@@ -823,7 +823,7 @@ do
 			Out:puts(BoincSettingGetDescription(curr).."~>")
 		end
 	end
-
+	Out:flush()
 end
 
 return Selected
@@ -858,11 +858,13 @@ do
 	if BoincSettingIsIgnored(name) == false
 	then
 	value=Config[name]
+	if value=="true" then value="~w~etrue~0" end
+	if value=="false" then value="~bfalse~0" end
 	Menu:add(string.format("% 30s:  %s", BoincSettingGetName(name), value), name)
 	end
 end
 
-Menu:add("SAVE CONFIG - push changes to boinc", "save")
+Menu:add("~rSAVE CONFIG - push changes to boinc~0", "save")
 
 Menu:draw()
 Selected=DisplayBoincConfigRunMenu(Menu)
