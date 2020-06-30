@@ -187,11 +187,11 @@ function BoincGetProjectList()
 local S, P, plist, item, str
 local projects={}
 
-S=stream.STREAM(boinc_dir.."project_list.xml", "r")
+S=stream.STREAM(boinc_dir.."/project_list.xml", "r")
 if S==nil
 then
-	filesys.copy("https://boinc.berkeley.edu/project_list.php", boinc_dir.."project_list.xml")
-	S=stream.STREAM(boinc_dir.."project_list.xml", "r")
+	filesys.copy("https://boinc.berkeley.edu/project_list.php", boinc_dir.."/project_list.xml")
+	S=stream.STREAM(boinc_dir.."/project_list.xml", "r")
 end
 
 str=S:readdoc()
@@ -470,7 +470,11 @@ end
 
 
 function BoincAcctMgrSet(url)
-local S, P, str, result
+local S, P, str, result, acct_mgr
+
+acct_mgr=BoincAcctMgrLookup()
+-- if we are already set to the right account manager then do nothing
+if url == acct_mgr.url then return end
 
 BoincAcctMgrLeave()
 P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct_username.."</name>\n<password>"..acct_pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
@@ -492,6 +496,7 @@ end
 
 print("result: [".. result.."]")
 S:close()
+
 end
 
 end
@@ -1113,6 +1118,8 @@ Out:bar("up/down/enter:select menu item   esc:back", "fcolor=white bcolor=blue")
 Out:move(0,0)
 Out:puts("~B~wSELECT PROJECT~>~0\n")
 projects=BoincGetProjectList()
+if projects ~= nil
+then
 sorted=SortTable(projects, ProjectsSort)
 wid=Out:width() - 2
 len=Out:length() -3
@@ -1127,6 +1134,7 @@ do
 end
 
 Selected=Menu:run()
+end
 
 Out:clear()
 Out:move(0,0)
@@ -1251,11 +1259,11 @@ end
 function JoinProjectScreen()
 	if strutil.strlen(acct_email)==0 or strutil.strlen(acct_username)==0 or strutil.strlen(acct_pass)==0
 	then
-		Out:clear()
-		Out:move(0,4)
-		Out:puts("~R~wERROR: cannot join projects without email, username and password.\n")
-		Out:puts("~R~wPlease restart and provide this information on the command line. \n")
-		Out:puts("~R~w               PRESS ANY KEY                                     \n")
+		Out:move(0,Out:height()-6)
+		Out:puts("~R~w  ERROR: cannot join projects without email, username and password.\n")
+		Out:puts("~R~w  Please restart and provide this information on the command line. \n")
+		Out:puts("~R~w                       PRESS ANY KEY                               \n~0")
+		Out:flush()
 		Out:getc()
 	else
 		Selected=DisplayProjectsMenu()
@@ -1376,6 +1384,7 @@ local str, name
 	menu_tabbar="  Control  [~eProjects~0]  Tasks    Log   "
 	
 	str=string.format("\n   %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
+
 	if Out:width() > 82
 	then
 		str=str..string.format(" %7s  % 10s  % 10s", "disk use", "cred/hour", "cred/min")
@@ -1385,6 +1394,7 @@ local str, name
 	Menu:add("[add new project]", "new_project")
 	for i,proj in pairs(projects)
 	do
+		str=""
 		if proj.jobs_active ==0 and (proj.state=="nomore" or proj.state=="suspend")
 		then 
 			active="PAUSED"
@@ -1394,7 +1404,7 @@ local str, name
 
 		if strutil.strlen(proj.name)==0
 		then
-		name="** ADDING **   " .. proj.url
+		str="** ADDING **   " .. proj.url
 		else
 		name=string.sub(proj.name, 1, 20)
 
@@ -1421,7 +1431,6 @@ function MenuSwitch(display_state, boinc_state)
 
 Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
 Menu:clear()
-io.stderr:write("ms: "..tostring(display_state).."\n")
 if display_state==DISPLAY_LOGS
 then
 	LogMenu(Menu)
