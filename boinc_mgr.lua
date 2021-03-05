@@ -474,9 +474,12 @@ local S, P, str, result, acct_mgr
 
 acct_mgr=BoincAcctMgrLookup()
 -- if we are already set to the right account manager then do nothing
+if acct_mgr ~= nil and acct_mgr.url ~= nil
+then
 if url == acct_mgr.url then return end
-
 BoincAcctMgrLeave()
+end
+
 P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct_username.."</name>\n<password>"..acct_pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
 
 result=BoincRPCResult(P, "Join account manager")
