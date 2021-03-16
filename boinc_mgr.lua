@@ -1477,12 +1477,12 @@ do
 	then
 		boinc_state=BoincGetState()
 		if display_state==DISPLAY_LOGS then GetLogs() end
-	elseif ch=="LEFT" 
+	elseif ch=="LEFT" or ch=="CTRL_A" 
 	then 
 		display_state=display_state - 1
 		if display_state < 0 then display_state=0 end
 		MainMenu=MenuSwitch(display_state, boinc_state)
-	elseif ch=="RIGHT" 
+	elseif ch=="RIGHT" or ch=="CTRL_D"
 	then 
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
