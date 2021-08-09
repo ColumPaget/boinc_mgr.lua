@@ -21,19 +21,23 @@ Set these to the email, username and password that you use to create accounts on
 OR use the environment variables BOINC_USERNAME, BOINC_EMAIL and BOINC_PASSWORD which override these
 OR use the -user, -email and -pass command-line arguments that override other methods
 ]]--
-acct_username=""
-acct_email=""
-acct_pass=""
-acct_mgr=""
 
+acct={}
+acct.username=""
+acct.email=""
+acct.pass=""
+
+config={}
+config.acct_mgr=""
 -- gui key can be set here if you only connect to one boinc instance. Otherwise you can set the key with
 -- the '-key' command-line argument, and save it with the '-save' option.
-gui_key=""
+config.gui_key=""
+config.default_port="31416"
+config.boinc_dir=process.homeDir().."/.boinc"
 
-default_port="31416"
+
 server_url=""
-boinc_host="tcp:127.0.0.1:"..default_port
-boinc_dir=process.homeDir().."/.boinc"
+boinc_host="tcp:127.0.0.1:"..config.default_port
 save_key="n"
 menu_tabbar=""
 
@@ -90,27 +94,46 @@ end
 function SaveGuiKey()
 local S
 
-if strutil.strlen(server_url) > 0 and strutil.strlen(gui_key) > 0
+if strutil.strlen(server_url) > 0 and strutil.strlen(config.gui_key) > 0
 then
-filesys.mkdir(boinc_dir)
-S=stream.STREAM(boinc_dir.."/keys.txt","a")
-S:writeln(server_url.." "..gui_key.."\n")
+filesys.mkdir(config.boinc_dir)
+S=stream.STREAM(config.boinc_dir.."/keys.txt","a")
+if S ~= nil
+then
+S:writeln(server_url.." "..config.gui_key.."\n")
 S:close()
 end
+end
 
+end
+
+
+
+function BoincConnect(url)
+local proxy, dest
+
+if string.sub(url, 1, 4)=="ssh:" 
+then 
+	proxy=string.sub(url, 5) 
+	net.setProxy("sshtunnel:"..proxy)
+else
+	dest=url..":"..config.default_port
+end
+
+return(stream.STREAM(dest))
 end
 
 
 function BoincRPCAuth(S)
 local P, I, str
 
-if strutil.strlen(gui_key)==0 then return false end
+if strutil.strlen(config.gui_key)==0 then return false end
 
 S:writeln("<boinc_gui_rpc_request>\n<auth1/>\n</boinc_gui_rpc_request>\n\003");
 str=S:readto("\003")
 P=dataparser.PARSER("xml", str);
 I=P:open("/boinc_gui_rpc_reply");
-str=I:value("nonce") .. gui_key 
+str=I:value("nonce") .. config.gui_key 
 str=hash.hashstr(str, "md5", "hex")
 S:writeln("<boinc_gui_rpc_request>\n<auth2>\n<nonce_hash>"..str.."</nonce_hash>\n</auth2>\n</boinc_gui_rpc_request>\n\3")
 
@@ -142,15 +165,20 @@ end
 function BoincTransaction(xml, CheckSuccess, Type)
 local S, P, str, result
 
-S=stream.STREAM(boinc_host)
+S=BoincConnect(server_url)
+if S ~= nil
+then
 Out:bar("Sending "..Type.." request to server ...", "fcolor=yellow bcolor=magenta")
 BoincRPCAuth(S)
 S:writeln(xml)
 str=S:readto("\003")
 P=dataparser.PARSER("xml", str)
 
+io.stderr:write(str.."\n")
+
 if CheckSuccess then result=BoincRPCResult(P, Type) end
 S:close()
+end
 
 return P
 end
@@ -187,11 +215,11 @@ function BoincGetProjectList()
 local S, P, plist, item, str
 local projects={}
 
-S=stream.STREAM(boinc_dir.."/project_list.xml", "r")
+S=stream.STREAM(config.boinc_dir.."/project_list.xml", "r")
 if S==nil
 then
-	filesys.copy("https://boinc.berkeley.edu/project_list.php", boinc_dir.."/project_list.xml")
-	S=stream.STREAM(boinc_dir.."/project_list.xml", "r")
+	filesys.copy("https://boinc.berkeley.edu/project_list.php", config.boinc_dir.."/project_list.xml")
+	S=stream.STREAM(config.boinc_dir.."/project_list.xml", "r")
 end
 
 str=S:readdoc()
@@ -399,13 +427,15 @@ function BoincJoinProject(url, authenticator)
 local str, P
 
 Out:bar("Joining "..url, "fcolor=black bcolor=yellow")
-str=acct_pass..acct_email
+str=acct.pass..acct.email
 str=hash.hashstr(str, "md5", "hex")
 
-S=stream.STREAM(boinc_host)
+S=BoincConnect(server_url)
+if S ~= nil
+then
 BoincRPCAuth(S)
 
-str="<boinc_gui_rpc_request>\n<create_account>\n   <url>".. url .. "</url>\n   <email_addr>" .. acct_email .. "</email_addr>\n   <passwd_hash>" .. str .. "</passwd_hash>\n   <user_name>" .. acct_username .. "</user_name>\n   <team_name></team_name>\n</create_account>\n</boinc_gui_rpc_request>\n\3"
+str="<boinc_gui_rpc_request>\n<create_account>\n   <url>".. url .. "</url>\n   <email_addr>" .. acct.email .. "</email_addr>\n   <passwd_hash>" .. str .. "</passwd_hash>\n   <user_name>" .. acct.username .. "</user_name>\n   <team_name></team_name>\n</create_account>\n</boinc_gui_rpc_request>\n\3"
 
 S:writeln(str)
 
@@ -430,12 +460,13 @@ then
 	print(P:value("/boinc_gui_rpc_reply/account_out/error_msg"))
 
 	--try looking up authenticator
-	str=BoincAcctLookupAuthenticator(S, url, acct_email, acct_pass)
+	str=BoincAcctLookupAuthenticator(S, url, acct.email, acct.pass)
 end
 
 BoincAttachProject(S, url, str)
 
 S:close()
+end
 
 end
 
@@ -480,12 +511,12 @@ if url == acct_mgr.url then return end
 BoincAcctMgrLeave()
 end
 
-P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct_username.."</name>\n<password>"..acct_pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
+P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct.username.."</name>\n<password>"..acct.pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
 
 result=BoincRPCResult(P, "Join account manager")
 if result
 then
-S=stream.STREAM(boinc_host)
+S=BoincConnect(server_url)
 BoincRPCAuth(S)
 while true
 do
@@ -561,7 +592,7 @@ local state={}
 state.projects={}
 state.tasks={}
 
-S=stream.STREAM(boinc_host)
+S=BoincConnect(server_url)
 if S==nil then return nil end
 
 
@@ -784,7 +815,7 @@ end
 function BoincConfigScreenRefresh()
 Out:clear()
 Out:move(0,0)
-Out:puts("Configure boinc@"..boinc_host.."~0\n")
+Out:puts("Configure boinc@"..server_url.."~0\n")
 Out:puts(" Some settings may require restarting boinc to take effect\n")
 Out:puts(" ~R~wDon't forget to select SAVE CONFIG at the bottom of the menu~0\n")
 Out:bar("esc:back  up/down:select item   enter:modify", "fcolor=blue bcolor=cyan")
@@ -913,7 +944,7 @@ if Selected=="final" then op="project_detach_when_done" end
 
 if op ~= nil
 then
-S=stream.STREAM(boinc_host)
+S=BoincConnect(server_url)
 str="<boinc_gui_rpc_request>\n<" .. op .. ">\n  <project_url>" ..  proj.url .. "</project_url>\n</"..op..">\n</boinc_gui_rpc_request>\n\003"
 if BoincTransaction(str, true, Selected .. " project")
 then
@@ -1014,13 +1045,17 @@ Menu:add("exit    - exit menu", "exit")
 while Selected ~= "exit"
 do
 	Selected=Menu:run()
+
 	if Selected == nil then Selected="exit" end
 	if Selected ~= "exit" 
 	then 
 		ProjectsAltered=true 
-		break
+		BoincProjectOperation(Selected, proj)
+		process.sleep(1)
+		boinc_state=BoincGetState()
+		break;
 	end
-	BoincProjectOperation(Selected, proj)
+
 	DisplayProjectDetails(proj)
 end
 
@@ -1152,12 +1187,12 @@ end
 function StartBoincLocalhost()
 local pid
 
-	filesys.mkdir(boinc_dir)
+	filesys.mkdir(config.boinc_dir)
 	Out:puts("~yStarting boinc~0\n")
 	pid=process.xfork()
 	if pid==0
 	then
-		process.chdir(boinc_dir)
+		process.chdir(config.boinc_dir)
 		os.execute("boinc --daemon")
 		--we will only get here if os.execute fails
 		os.exit(0)
@@ -1168,7 +1203,7 @@ local pid
 		for i=1,5,1
 		do
 		process.sleep(1)
-		S=stream.STREAM(boinc_host)
+		S=BoincConnect(server_url)
 		if S ~= nil
 		then
 			S:close()
@@ -1176,10 +1211,10 @@ local pid
 		end
 
 		end
-		S=stream.STREAM(boinc_dir.."/gui_rpc_auth.cfg")
+		S=stream.STREAM(config.boinc_dir.."/gui_rpc_auth.cfg")
 		if S ~=nil
 		then
-		gui_key=S:readln()
+		config.gui_key=S:readln()
 		S:close()
 		SaveGuiKey()
 		end
@@ -1192,20 +1227,20 @@ end
 function StartBoincSSHhost()
 local pid
 
-	filesys.mkdir(boinc_dir)
+	filesys.mkdir(config.boinc_dir)
 	Out:puts("~yStarting boinc~0\n")
 	pid=process.xfork()
 	if pid==0
 	then
-		process.chdir(boinc_dir)
+		process.chdir(config.boinc_dir)
 		Out:close()
 		os.execute("boinc --daemon")
 		process.sleep(2)
 		os.exit(0)
 	else
 		process.wait(pid)
-		S=stream.STREAM(boinc_dir.."/gui_rpc_auth.cfg")
-		gui_key=S:readln()
+		S=stream.STREAM(config.boinc_dir.."/gui_rpc_auth.cfg")
+		config.gui_key=S:readln()
 		S:close()
 
 		SaveGuiKey()
@@ -1260,7 +1295,7 @@ end
 
 
 function JoinProjectScreen()
-	if strutil.strlen(acct_email)==0 or strutil.strlen(acct_username)==0 or strutil.strlen(acct_pass)==0
+	if strutil.strlen(acct.email)==0 or strutil.strlen(acct.username)==0 or strutil.strlen(acct.pass)==0
 	then
 		Out:move(0,Out:height()-6)
 		Out:puts("~R~w  ERROR: cannot join projects without email, username and password.\n")
@@ -1296,7 +1331,7 @@ end
 end
 
 
--- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuSwitch and it's subfunctions)
+-- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuRefresh and it's subfunctions)
 -- but pushes all the data out to the display
 function ScreenRefresh(Menu, display_state, boinc_state)
 
@@ -1329,8 +1364,9 @@ end
 
 -- load up log messages from boinc, ready to be displayed
 function LogMenu(Menu)
-local P, item, str, when
+local P, item, str, when, timestr, now, diff
 
+	now=time.secs()
 	--tasks=SortTable(unsort_tasks, TasksSort)
 	menu_tabbar="  Control   Projects   Tasks   [~eLog~0]   "
 
@@ -1341,8 +1377,16 @@ local P, item, str, when
 	do
 		str=strutil.stripTrailingWhitespace(item:value("body"))
 		str=strutil.stripLeadingWhitespace(str)
-		when=time.formatsecs("%Y/%m/%d %H:%M:%S  ", tonumber(item:value("time"))) 
-		str=string.format("%s %20s   %s", when, item:value("project"), str)
+		when=tonumber(item:value("time"))
+		diff=now-when
+		if diff < 60 then timestr="~ew"
+		elseif diff < 300 then timestr="~w"
+		elseif diff < 600 then timestr="~y"
+		else timestr="~n"
+		end
+
+		timestr=timestr .. time.formatsecs("%Y/%m/%d %H:%M:%S  ", when) .."~0"
+		str=string.format("%s %20s   %s", timestr, item:value("project"), str)
 		Menu:add(string.sub(str, 1, Out:width() -8))
 	item=g_Logs:next()
 	end
@@ -1355,9 +1399,10 @@ end
 
 -- load up details of running tasks ready to be displayed
 function TasksMenu(Menu, unsort_tasks)
-local Selected, i, task, due
+local Selected, i, task, due, now, state_color
 local tasks={}
 
+	now=time.secs()
 	tasks=SortTable(unsort_tasks, TasksSort)
 	menu_tabbar="  Control   Projects  [~eTasks~0]   Log    "
 	menu_tabbar=menu_tabbar..string.format("\n   %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due")
@@ -1365,8 +1410,19 @@ local tasks={}
 	do
 		if task.slot > -1
 		then
-			due=time.formatsecs("%y/%m/%d", task.deadline)
-			Menu:add(string.format("%04d % 20s %6s % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
+			diff=task.deadline - now
+			if diff < 0 then due="~R~w"
+			elseif diff < (3600 * 24) then due="~m"
+			elseif diff < (3600 * 24 * 3) then due="~y"
+			else due="~n"
+			end
+			due=due .. time.formatsecs("%y/%m/%d", task.deadline) .. "~0"
+
+			if task.state == "run" then state_color="~y"
+			else state_color=""
+			end
+
+			Menu:add(string.format("%04d ~w% 20s~0 %s%6s~0 % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), state_color, task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
 		end
 	end
 	Menu:add("exit app", "exit")
@@ -1400,9 +1456,11 @@ local str, name
 		str=""
 		if proj.jobs_active ==0 and (proj.state=="nomore" or proj.state=="suspend")
 		then 
-			active="PAUSED"
+			active="~mPAUSED~0"
 		else
-			active=string.format("%6d", proj.jobs_active)
+			if proj.jobs_active > 0 then active=string.format("~y%6d~0", proj.jobs_active)
+			else active=string.format("%6d", proj.jobs_active)
+			end
 		end
 
 		if strutil.strlen(proj.name)==0
@@ -1411,7 +1469,7 @@ local str, name
 		else
 		name=string.sub(proj.name, 1, 20)
 
-		str=string.format("%20s % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+		str=string.format("~w%20s~0 % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
 
 		if Out:width() > 82 
 		then
@@ -1430,9 +1488,10 @@ end
 
 
 -- when we switch between menus we need to rebuild them (i.e. load their details into the Menu object)
-function MenuSwitch(display_state, boinc_state)
+function MenuRefresh(display_state, boinc_state)
 
 Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
+Menu:config("~C~n", "~C~e~n")
 Menu:clear()
 if display_state==DISPLAY_LOGS
 then
@@ -1460,7 +1519,7 @@ while true
 do
 	-- if we get a SIGWINCH signal, it means the screen has changed size, and we have to rebuild the menu
 	-- to fit the new width/height of the screen
-	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuSwitch(display_state, boinc_state) end
+	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuRefresh(display_state, boinc_state) end
 
 	-- refresh the screen, doesn't change any details, just pushes the current screen to the terminal
 	ScreenRefresh(MainMenu, display_state, boinc_state)
@@ -1477,16 +1536,17 @@ do
 	then
 		boinc_state=BoincGetState()
 		if display_state==DISPLAY_LOGS then GetLogs() end
+		MainMenu=MenuRefresh(display_state, boinc_state)
 	elseif ch=="LEFT" or ch=="CTRL_A" 
 	then 
 		display_state=display_state - 1
 		if display_state < 0 then display_state=0 end
-		MainMenu=MenuSwitch(display_state, boinc_state)
+		MainMenu=MenuRefresh(display_state, boinc_state)
 	elseif ch=="RIGHT" or ch=="CTRL_D"
 	then 
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
-		MainMenu=MenuSwitch(display_state, boinc_state)
+		MainMenu=MenuRefresh(display_state, boinc_state)
 	elseif ch ~= ""
 	then
 		Selected=MainMenu:onkey(ch)
@@ -1507,14 +1567,6 @@ local display_state=0
 local boinc_state, result
 
 
-if string.sub(server_url, 1, 4)=="ssh:" 
-then 
-	host=string.sub(server_url, 5) 
-	net.setProxy("sshtunnel:"..host)
-else
-	boinc_host=server_url..":"..default_port
-end
-
 Out:clear()
 Out:move(0,0)
 Out:puts("~yConnecting to host [~0~e"..server_url.."~y]~0\n")
@@ -1532,7 +1584,7 @@ then
 elseif boinc_state=="unauthorized" 
 then
 	Out:puts("~rERROR: authorization failed~0\n")
-	if strutil.strlen(gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
+	if strutil.strlen(config.gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
 	return
 end
 
@@ -1551,7 +1603,7 @@ then
 end
 
 --sets us to the default menu
-MainMenu=MenuSwitch(display_state, boinc_state)
+MainMenu=MenuRefresh(display_state, boinc_state)
 while true
 do
 	Selected,display_state=DisplayHostProcessMenu(display_state, boinc_state)
@@ -1649,19 +1701,19 @@ do
 		if arg[i] == "-key" 
 		then 
 			i=i+1
-			gui_key=arg[i]
+			config.gui_key=arg[i]
 		elseif arg[i] == "-user"
 		then
 			i=i+1
-			acct_username=arg[i]
+			acct.username=arg[i]
 		elseif arg[i] == "-email"
 		then
 			i=i+1
-			acct_email=arg[i]
+			acct.email=arg[i]
 		elseif arg[i] == "-pass"
 		then
 			i=i+1
-			acct_pass=arg[i]
+			acct.pass=arg[i]
 		elseif arg[i] == "-acct_mgr"
 		then
 			i=i+1
@@ -1689,7 +1741,7 @@ end
 function BoincLoadHosts()
 local S, str, host, key
 
-S=stream.STREAM(boinc_dir.."/keys.txt","r")
+S=stream.STREAM(config.boinc_dir.."/keys.txt","r")
 if S ~= nil
 then
 str=S:readln()
@@ -1724,11 +1776,11 @@ function BoincMgrInit()
 local tempstr
 
 tempstr=process.getenv("BOINC_USERNAME")
-if strutil.strlen(tempstr) > 0 then acct_username=tempstr end
+if strutil.strlen(tempstr) > 0 then acct.username=tempstr end
 tempstr=process.getenv("BOINC_EMAIL")
-if strutil.strlen(tempstr) > 0 then acct_email=tempstr end
+if strutil.strlen(tempstr) > 0 then acct.email=tempstr end
 tempstr=process.getenv("BOINC_PASSWORD")
-if strutil.strlen(tempstr) > 0 then acct_pass=tempstr end
+if strutil.strlen(tempstr) > 0 then acct.pass=tempstr end
 
 BoincMgrAddSetting("cc:abort_jobs_on_exit", "bool", "If boinc shuts down then throw away current tasks")
 BoincMgrAddSetting("cc:allow_multiple_clients", "bool", "Allow multiple boinc clients on one machine")
@@ -1821,9 +1873,9 @@ Out=terminal.TERM()
 BoincLoadHosts()
 server_url=SelectHost(server_url)
 
-if strutil.strlen(gui_key) ==0 
+if strutil.strlen(config.gui_key) ==0 
 then 
-	gui_key=hosts[server_url] 
+	config.gui_key=hosts[server_url] 
 elseif save_key == "y" 
 then 
 	SaveGuiKey() 
