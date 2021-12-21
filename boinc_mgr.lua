@@ -573,7 +573,7 @@ do
 		then
 		du=tonumber(item:value("disk_usage"))
 		state.disk_usage=state.disk_usage + du
-		projects[url].disk_usage=du
+		if projects[url] ~= nil then projects[url].disk_usage=du end
 		end
 	end
 	item=items:next()
