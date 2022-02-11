@@ -34,6 +34,7 @@ config.acct_mgr=""
 config.gui_key=""
 config.default_port="31416"
 config.boinc_dir=process.homeDir().."/.boinc"
+config.debug=false;
 
 
 server_url=""
@@ -45,6 +46,8 @@ hosts={}
 boinc_settings={} 
 
 MainMenu=nil
+
+
 
 function ToBoolean(val)
 
@@ -108,6 +111,44 @@ end
 end
 
 
+function BoincError(xml, trans_type)
+local errno, errstr, P
+
+P=dataparser.PARSER("xml", xml)
+if P ~= nil
+then
+errno=P:value("/boinc_gui_rpc_reply/"..trans_type.."/error_num");
+errstr=P:value("/boinc_gui_rpc_reply/"..trans_type.."/error_string");
+if strutil.strlen(errstr)==0
+then
+  if errno=="-1" then errstr="generic error"
+  elseif errno=="-112" then errstr="invalid XML"
+  elseif errno=="-136" then errstr="item not found in DB"
+  elseif errno=="-137" then errstr="name/email already in use"
+  elseif errno=="-138" then errstr="cant open DB"
+  elseif errno=="-161" then errstr="item not found"
+  elseif errno=="-182" then errstr="file transfer timeout"
+  elseif errno=="-183" then errstr="project down"
+  elseif errno=="-184" then errstr="http/https comms error"
+  elseif errno=="-186" then errstr="work unit download failed"
+  elseif errno=="-187" then errstr="work unit upload failed"
+  elseif errno=="-189" then errstr="invalid url"
+  elseif errno=="-205" then errstr="email bad syntax"
+  elseif errno=="-206" then errstr="wrong password"
+  elseif errno=="-207" then errstr="email already in use"
+  elseif errno=="-208" then errstr="account creation disabled"
+  elseif errno=="-209" then errstr="attach failed"
+end
+end
+else
+errno=0
+errstr="error parsing xml reply"
+end
+
+return errno, errstr
+end
+
+
 
 function BoincConnect(url)
 local proxy, dest
@@ -120,6 +161,7 @@ else
 	dest=url..":"..config.default_port
 end
 
+if config.debug == true then io.stderr:write("CONNECT: " ..dest.."\n") end
 return(stream.STREAM(dest))
 end
 
@@ -151,11 +193,13 @@ function BoincRPCResult(P, Type)
 if strutil.strlen(P:value("/boinc_gui_rpc_reply/success")) > 0 
 then 
 Out:bar(" SUCCESS: "..Type.." request processed","fcolor=white bcolor=green")
+Out:flush()
 process.sleep(2)
 return true
 else
-Out:bar(" ERROR: " .. Type .. "request failed. " .. P:value("/boinc_gui_rpc_reply/error"), "fcolor=white bcolor=red");
-Out:readln()
+Out:bar(" ERROR: " .. Type .. " request failed. " .. P:value("/boinc_gui_rpc_reply/error"), "fcolor=white bcolor=red");
+Out:flush()
+Out:getc()
 end
 
 return false
@@ -168,13 +212,13 @@ local S, P, str, result
 S=BoincConnect(server_url)
 if S ~= nil
 then
+if config.debug == true then io.stderr:write("SEND: " ..xml.."\n") end
 Out:bar("Sending "..Type.." request to server ...", "fcolor=yellow bcolor=magenta")
 BoincRPCAuth(S)
 S:writeln(xml)
 str=S:readto("\003")
+if config.debug == true then io.stderr:write("RECV: " ..xml.."\n") end
 P=dataparser.PARSER("xml", str)
-
-io.stderr:write(str.."\n")
 
 if CheckSuccess then result=BoincRPCResult(P, Type) end
 S:close()
@@ -424,9 +468,10 @@ end
 
 
 function BoincJoinProject(url, authenticator)
-local str, P
+local errno, errstr, str, S, P, project_auth
 
 Out:bar("Joining "..url, "fcolor=black bcolor=yellow")
+Out:flush()
 str=acct.pass..acct.email
 str=hash.hashstr(str, "md5", "hex")
 
@@ -438,32 +483,36 @@ BoincRPCAuth(S)
 str="<boinc_gui_rpc_request>\n<create_account>\n   <url>".. url .. "</url>\n   <email_addr>" .. acct.email .. "</email_addr>\n   <passwd_hash>" .. str .. "</passwd_hash>\n   <user_name>" .. acct.username .. "</user_name>\n   <team_name></team_name>\n</create_account>\n</boinc_gui_rpc_request>\n\3"
 
 S:writeln(str)
+if config.debug == true then io.stderr:write("SEND: " ..str.."\n") end
 
 str=S:readto("\003")
-P=dataparser.PARSER("xml", str)
+if config.debug == true then io.stderr:write("RECV: " ..str.."\n") end
 
 while true
 do
 	S:writeln("<boinc_gui_rpc_request>\n<create_account_poll/>\n</boinc_gui_rpc_request>\n\003")
 	str=S:readto("\003")
+	if config.debug == true then io.stderr:write("RECV: " ..str.."\n") end
 
-	P=dataparser.PARSER("xml", str)
-	print("errno: ".. P:value("/boinc_gui_rpc_reply/account_out/error_num"))
-	if P:value("/boinc_gui_rpc_reply/account_out/error_num") ~= "-204" then break end
+	errno,errstr=BoincError(str, "account_out")
+
+	if errno ~= "-204" then break end
 	process.sleep(1)
 end
 
-str=P:value("/boinc_gui_rpc_reply/account_out/authenticator")
-if strutil.strlen(str) ==0
+P=dataparser.PARSER("xml", str)
+project_auth=P:value("/boinc_gui_rpc_reply/account_out/authenticator")
+if strutil.strlen(project_auth) == 0
 then
-	print(P:value("/boinc_gui_rpc_reply/account_out/error_num"))
-	print(P:value("/boinc_gui_rpc_reply/account_out/error_msg"))
+	errno, errstr=BoincError(str, "account_out")
+	Out:bar("ERROR: "..errno.." "..errstr, "fcolor=white bcolor=red")
+	Out:flush()
 
 	--try looking up authenticator
-	str=BoincAcctLookupAuthenticator(S, url, acct.email, acct.pass)
+	project_auth=BoincAcctLookupAuthenticator(S, url, acct.email, acct.pass)
 end
 
-BoincAttachProject(S, url, str)
+BoincAttachProject(S, url, project_auth)
 
 S:close()
 end
@@ -1147,40 +1196,6 @@ end
 
 
 
-function DisplayProjectsMenu()
-local projects, sorted, url, proj, Selected
-local wid, len
-
-Out:clear()
-Out:bar("up/down/enter:select menu item   esc:back", "fcolor=white bcolor=blue")
-Out:move(0,0)
-Out:puts("~B~wSELECT PROJECT~>~0\n")
-projects=BoincGetProjectList()
-if projects ~= nil
-then
-sorted=SortTable(projects, ProjectsSort)
-wid=Out:width() - 2
-len=Out:length() -3
-Menu=terminal.TERMMENU(Out, 0, 0, wid, len)
-
-for url,proj in pairs(sorted)
-do
-	str=proj.name .. "  " .. proj.url .. "  " .. proj.descript;
-
-	if strutil.strlen(str) > wid-2 then str=string.sub(str, 1, wid-2) end
-	Menu:add(str, proj.url)
-end
-
-Selected=Menu:run()
-end
-
-Out:clear()
-Out:move(0,0)
-return Selected
-end
-
-
-
 
 
 
@@ -1294,6 +1309,43 @@ end
 
 
 
+function DisplayProjectsMenu()
+local projects, sorted, url, proj, Selected
+local wid, len
+
+Out:clear()
+Out:bar("up/down/enter:select menu item   esc:back", "fcolor=white bcolor=blue")
+Out:move(0,0)
+Out:puts("~B~wSELECT PROJECT~>~0\n")
+projects=BoincGetProjectList()
+if projects ~= nil
+then
+sorted=SortTable(projects, ProjectsSort)
+wid=Out:width() - 2
+len=Out:length() -3
+Menu=terminal.TERMMENU(Out, 1, 2, wid, len)
+
+for url,proj in pairs(sorted)
+do
+	str=proj.name .. "  " .. proj.url .. "  " .. proj.descript;
+
+	if strutil.strlen(str) > wid-2 then str=string.sub(str, 1, wid-2) end
+	Menu:add(str, proj.url)
+end
+Menu:add("Custom Project not on official list", "custom")
+
+Selected=Menu:run()
+end
+
+Out:clear()
+Out:move(0,0)
+return Selected
+end
+
+
+
+
+
 function JoinProjectScreen()
 	if strutil.strlen(acct.email)==0 or strutil.strlen(acct.username)==0 or strutil.strlen(acct.pass)==0
 	then
@@ -1305,6 +1357,14 @@ function JoinProjectScreen()
 		Out:getc()
 	else
 		Selected=DisplayProjectsMenu()
+
+		if Selected == "custom"
+		then 
+		Out:clear()
+		Out:move(2,2)
+		Selected=Out:prompt("ENTER PROJECT URL: ")
+		end
+
 		if strutil.strlen(Selected) > 0 then BoincJoinProject(Selected) end
 	end
 end
@@ -1672,6 +1732,8 @@ function PrintHelp()
 	print("   -email <email>      boinc email needed for joining projects")
 	print("   -pass  <pass>       boinc password needed for joining projects")
 	print("   -save               save gui_key for url")
+	print("   -debug              enable debugging: lots of stuff printed to stderr")
+	print("   -d                  enable debugging: lots of stuff printed to stderr")
 	print("   -?                  this help")
 	print("   -h                  this help")
 	print("   -help               this help")
@@ -1721,6 +1783,9 @@ do
 		elseif arg[i] == "-save"
 		then
 			save_key="y"
+		elseif arg[i] == "-debug" or arg[i] == "-d"
+		then
+			config.debug=true
 		elseif arg[i] == "-?" or arg[i] == "-h" or arg[i] == "-help" or arg[i] == "--help"
 		then
 			PrintHelp()
