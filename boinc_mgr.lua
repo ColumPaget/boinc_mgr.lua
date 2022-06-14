@@ -1607,6 +1607,11 @@ do
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
 		MainMenu=MenuRefresh(display_state, boinc_state)
+        elseif ch=="\t"
+	then
+		display_state=display_state + 1
+		if display_state > DISPLAY_LOGS then display_state=0 end
+		MainMenu=MenuRefresh(display_state, boinc_state)
 	elseif ch ~= ""
 	then
 		Selected=MainMenu:onkey(ch)
