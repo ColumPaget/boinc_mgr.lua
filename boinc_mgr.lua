@@ -240,7 +240,7 @@ end
 
 function ParseProjectListItem(info)
 local proj={}
-
+local P
 
 proj.name=info:value("name")
 proj.url=info:value("url")
@@ -250,6 +250,18 @@ proj.location=info:value("home")
 proj.type=info:value("general_area")
 proj.subtype=info:value("specific_area")
 proj.logo=info:value("image")
+
+proj.platforms={}
+P=info:open("platforms")
+if P ~= nil
+then
+	plat=P:next()
+	while plat ~= nil
+	do
+	table.insert(proj.platforms, plat:value("name"))
+	plat=P:next()
+	end
+end
 
 return proj
 end
@@ -272,8 +284,12 @@ plist=P:open("/projects")
 item=plist:first()
 while item ~= nil
 do
+	if item:name()=="project"
+	then
 	proj=ParseProjectListItem(item)
 	projects[proj.url]=proj
+	end
+
 	item=plist:next()
 end
 
@@ -1308,33 +1324,146 @@ return ""
 end
 
 
+function FormatPlatform(item)
+local toks, tok 
+local os=""
+local arch=""
 
-function DisplayProjectsMenu()
+toks=strutil.TOKENIZER(item, "-|[","m")
+tok=toks:next()
+if tok=="x86" then arch="32"
+elseif tok=="i686" then arch="32"
+elseif tok=="x86_64" then arch="64"
+elseif tok=="windows_x86_64" then arch="64"; os="win"
+elseif tok=="windows_intelx86" then arch="32"; os="win"
+elseif tok=="aarch64" then arch="arm64"
+elseif tok=="arm64" then arch="arm64"
+elseif tok=="arm" then arch="arm32"
+elseif tok=="powerpc" then arch="ppc"
+elseif tok=="e2k" then arch="e2k"
+end
+
+tok=toks:next()
+tok=toks:next()
+if tok=="linux" then os="lin"
+elseif tok=="windows" then os="win"
+elseif tok=="android" then os="and"
+elseif tok=="darwin" then os="osx"
+elseif tok=="freebsd" then os="bsd"
+end
+
+
+return os..arch
+end
+
+
+function FormatProjectPlatforms(proj)
+local i,item
+local platforms={}
+local str=""
+local ourplat="lin32"
+
+
+for i,item in ipairs(proj.platforms)
+do
+platforms[FormatPlatform(item)]=""
+end
+
+for item,i in pairs(platforms)
+do
+if item==ourplat then str=str.." ~w"..item.."~0"
+else str=str.." "..item
+end
+
+end
+
+return str
+end
+
+
+function DisplayProjectsRunMenu(Menu, projects)
+local Selected=nil
+local ch, curr, str, proj, i, item
+
+Menu:draw()
+while Selected == nil
+do
+	ch=Out:getc()
+	if ch=="ESC" then break end
+	Selected=Menu:onkey(ch)
+
+	-- check this feature exists before trying to use it, earlier versions of
+	-- libUseful-lua don't have this
+	if Menu.curr ~= nil
+	then
+		curr=Menu:curr()
+		if curr ~= nil 
+		then
+			Out:move(0, Out:length()-6)
+			proj=projects[curr]
+			if proj ~= nil 
+			then
+			str="~e"..proj.name.."~0 ~b"..proj.url.. "~0 ~y"..proj.type.."/"..proj.subtype.."~0 ~c "..proj.location
+			str=terminal.strtrunc(str, Out:width() -2) .."~0~>\n"
+			Out:puts(str)
+
+			str=strutil.padto(proj.detail, ' ', Out:width() * 4)
+			str=terminal.strtrunc(str, Out:width() * 4) .. "~>"
+
+			--[[
+			str=str.."Platforms:"
+			for i,item in ipairs(proj.platforms) do str=str.." "..item end
+			]]--
+			Out:puts(str)
+			end
+		end
+	end
+	Out:flush()
+end
+
+return Selected
+end
+
+
+
+function DisplayProjectsMenu(selectable)
 local projects, sorted, url, proj, Selected
 local wid, len
 
 Out:clear()
 Out:bar("up/down/enter:select menu item   esc:back", "fcolor=white bcolor=blue")
 Out:move(0,0)
-Out:puts("~B~wSELECT PROJECT~>~0\n")
+
+if selectable == true then Out:puts("~B~wSELECT PROJECT~>~0\n")
+else Out:puts("~B~wACTIVE PROJECTS~>~0\n")
+end
+
 projects=BoincGetProjectList()
 if projects ~= nil
 then
 sorted=SortTable(projects, ProjectsSort)
 wid=Out:width() - 2
-len=Out:length() -3
+len=Out:length() -10
 Menu=terminal.TERMMENU(Out, 1, 2, wid, len)
 
 for url,proj in pairs(sorted)
 do
-	str=proj.name .. "  " .. proj.url .. "  " .. proj.descript;
+	str="~e~w" .. proj.name .. "~0 "
+	str=strutil.padto(str, ' ', 32)
+	if strutil.strlen(proj.descript) > 0 then str=str..  "~e~y" .. proj.descript .."~0"
+	else str=str..  "~e~y" .. proj.subtype .."~0"
+	end
 
 	if strutil.strlen(str) > wid-2 then str=string.sub(str, 1, wid-2) end
+
+	str=str.. "   " .. FormatProjectPlatforms(proj)
 	Menu:add(str, proj.url)
 end
-Menu:add("Custom Project not on official list", "custom")
 
-Selected=Menu:run()
+if selectable==true then Menu:add("Custom Project not on official list", "custom") end
+
+--Selected=Menu:run()
+Selected=DisplayProjectsRunMenu(Menu, projects)
 end
 
 Out:clear()
@@ -1344,6 +1473,9 @@ end
 
 
 
+function AllProjectsScreen()
+DisplayProjectsMenu(false)
+end
 
 
 function JoinProjectScreen()
@@ -1356,7 +1488,7 @@ function JoinProjectScreen()
 		Out:flush()
 		Out:getc()
 	else
-		Selected=DisplayProjectsMenu()
+		Selected=DisplayProjectsMenu(true)
 
 		if Selected == "custom"
 		then 
@@ -1391,9 +1523,9 @@ end
 end
 
 
--- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuRefresh and it's subfunctions)
+-- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuSwitch and it's subfunctions)
 -- but pushes all the data out to the display
-function ScreenRefresh(Menu, display_state, boinc_state)
+function ScreenRefresh(Menu, boinc_state)
 
 Out:cork()
 Out:clear()
@@ -1422,13 +1554,10 @@ end
 
 
 
--- load up log messages from boinc, ready to be displayed
-function LogMenu(Menu)
-local P, item, str, when, timestr, now, diff
-
-	now=time.secs()
-	--tasks=SortTable(unsort_tasks, TasksSort)
-	menu_tabbar="  Control   Projects   Tasks   [~eLog~0]   "
+function LogLoad(oldest, newest)
+local selected={}
+local item, str, when, diff, timestr
+local count=0
 
 	if g_Logs==nil then g_Logs=GetLogs() end
 
@@ -1438,20 +1567,75 @@ local P, item, str, when, timestr, now, diff
 		str=strutil.stripTrailingWhitespace(item:value("body"))
 		str=strutil.stripLeadingWhitespace(str)
 		when=tonumber(item:value("time"))
-		diff=now-when
-		if diff < 60 then timestr="~ew"
-		elseif diff < 300 then timestr="~w"
-		elseif diff < 600 then timestr="~y"
-		else timestr="~n"
+		if when > oldest
+		then
+			diff=Now-when
+			if diff < 60 then timestr="~ew"
+			elseif diff < 300 then timestr="~w"
+			elseif diff < 3600 then timestr="~y"
+			elseif diff < (3600 * 23) then timestr="~e~m"
+			else timestr="~n"
+			end
+
+			timestr=timestr .. time.formatsecs("%Y/%m/%d %H:%M:%S  ", when) .."~0"
+			str=string.format("%s %20s   %s", timestr, item:value("project"), str)
+			selected[count]=str
+			count=count+1
 		end
 
-		timestr=timestr .. time.formatsecs("%Y/%m/%d %H:%M:%S  ", when) .."~0"
-		str=string.format("%s %20s   %s", timestr, item:value("project"), str)
-		Menu:add(string.sub(str, 1, Out:width() -8))
 	item=g_Logs:next()
 	end
 
+
+return selected
+end
+
+
+
+function ExamineLogs()
+local projects={}
+local proj, str
+
+if g_Logs==nil then g_Logs=GetLogs() end
+item=g_Logs:first()
+while item~= nil
+do
+projects[item:value("project")]="yes"
+item=g_Logs:next()
+end
+
+
+Out:clear()
+Out:move(0,0)
+Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
+Menu:add("view full log", "full")
+for proj,str in pairs(projects) do Menu:add("log for "..proj, proj) end
+Menu:add("back")
+
+Menu:run()
+end
+
+
+-- load up log messages from boinc, ready to be displayed
+function LogMenu(Menu)
+local items, i, item
+
+	Now=time.secs()
+	--tasks=SortTable(unsort_tasks, TasksSort)
+	menu_tabbar="  Control   Projects   Tasks   [~eLog~0]   "
+
+	if g_Logs==nil then g_Logs=GetLogs() end
+
+	items=LogLoad(Now-3600*24, 0)
+
+	--Menu:add("~e~wExamine Logs~0", "examine")
+	--Menu:add("--- LAST 24 Hours ---")
+	for i=#items,1,-1
+	do
+	Menu:add(string.sub(items[i], 1, Out:width() -8))
+	end
 	Menu:add("exit app", "exit")
+
 
 	return true
 end
@@ -1459,10 +1643,10 @@ end
 
 -- load up details of running tasks ready to be displayed
 function TasksMenu(Menu, unsort_tasks)
-local Selected, i, task, due, now, state_color
+local Selected, i, task, due, state_color
 local tasks={}
 
-	now=time.secs()
+	Now=time.secs()
 	tasks=SortTable(unsort_tasks, TasksSort)
 	menu_tabbar="  Control   Projects  [~eTasks~0]   Log    "
 	menu_tabbar=menu_tabbar..string.format("\n   %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due")
@@ -1470,7 +1654,7 @@ local tasks={}
 	do
 		if task.slot > -1
 		then
-			diff=task.deadline - now
+			diff=task.deadline - Now
 			if diff < 0 then due="~R~w"
 			elseif diff < (3600 * 24) then due="~m"
 			elseif diff < (3600 * 24 * 3) then due="~y"
@@ -1510,6 +1694,7 @@ local str, name
 	end
 	menu_tabbar=menu_tabbar..str
 
+	Menu:add("[view all projects]", "all_project")
 	Menu:add("[add new project]", "new_project")
 	for i,proj in pairs(projects)
 	do
@@ -1548,7 +1733,7 @@ end
 
 
 -- when we switch between menus we need to rebuild them (i.e. load their details into the Menu object)
-function MenuRefresh(display_state, boinc_state)
+function MenuSwitch(display_state, boinc_state)
 
 Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
 Menu:config("~C~n", "~C~e~n")
@@ -1566,6 +1751,7 @@ else
 	ControlMenu(Menu)
 end
 
+Menu:draw()
 return Menu
 end
 
@@ -1575,14 +1761,14 @@ end
 function DisplayHostProcessMenu(display_state, boinc_state)
 local ch, Selected
 
+ScreenRefresh(MainMenu, boinc_state)
 while true
 do
 	-- if we get a SIGWINCH signal, it means the screen has changed size, and we have to rebuild the menu
 	-- to fit the new width/height of the screen
-	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuRefresh(display_state, boinc_state) end
+	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuSwitch(display_state, boinc_state) end
 
 	-- refresh the screen, doesn't change any details, just pushes the current screen to the terminal
-	ScreenRefresh(MainMenu, display_state, boinc_state)
 
 	--watch for a SIGWINCH (window size changed) signal
 	process.sigwatch(process.SIGWINCH)
@@ -1596,22 +1782,26 @@ do
 	then
 		boinc_state=BoincGetState()
 		if display_state==DISPLAY_LOGS then GetLogs() end
-		MainMenu=MenuRefresh(display_state, boinc_state)
+		MainMenu=MenuSwitch(display_state, boinc_state)
+		ScreenRefresh(MainMenu, boinc_state)
 	elseif ch=="LEFT" or ch=="CTRL_A" 
 	then 
 		display_state=display_state - 1
 		if display_state < 0 then display_state=0 end
-		MainMenu=MenuRefresh(display_state, boinc_state)
+		MainMenu=MenuSwitch(display_state, boinc_state)
+		ScreenRefresh(MainMenu, boinc_state)
 	elseif ch=="RIGHT" or ch=="CTRL_D"
 	then 
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
-		MainMenu=MenuRefresh(display_state, boinc_state)
+		MainMenu=MenuSwitch(display_state, boinc_state)
+		ScreenRefresh(MainMenu, boinc_state)
         elseif ch=="\t"
 	then
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=0 end
-		MainMenu=MenuRefresh(display_state, boinc_state)
+		MainMenu=MenuSwitch(display_state, boinc_state)
+		ScreenRefresh(MainMenu, boinc_state)
 	elseif ch ~= ""
 	then
 		Selected=MainMenu:onkey(ch)
@@ -1624,11 +1814,66 @@ end
 
 
 
+
+function BoincReconnect(boinc_state)
+if boinc_state==nil
+then
+	Out:puts("~rERROR: failed to connect to boinc at " .. server_url.."~0\n")
+	if AskToConnectToHost(server_url) then boinc_state=BoincGetState() 
+	else return nil
+	end
+elseif boinc_state=="unauthorized" 
+then
+	Out:puts("~rERROR: authorization failed~0\n")
+	if strutil.strlen(config.gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
+	return nil
+end
+
+if boinc_state==nil then Out:puts("~rERROR: failed to connect to host~0\n"); end
+return boinc_state
+end
+
+
+function ProcessMenus(boinc_state)
+local display_state=0
+local Selected
+
+--sets us to the default menu
+MainMenu=MenuSwitch(display_state, boinc_state)
+while true
+do
+	Selected,display_state=DisplayHostProcessMenu(display_state, boinc_state)
+
+	if Selected=="exit" 
+	then 
+		break
+	elseif Selected=="new_project" then JoinProjectScreen()
+	elseif Selected=="all_project" then AllProjectsScreen()
+
+	else
+		if display_state==DISPLAY_PROJECTS
+		then
+			DisplayProject(boinc_state.projects[Selected])
+		elseif display_state==DISPLAY_TASKS
+		then
+			DisplayTask(boinc_state.tasks[Selected])
+		elseif display_state==DISPLAY_LOGS
+		then
+			if Selected=="examine" then ExamineLogs() end
+		else
+			result=ProcessControl(Selected)
+			if result=="exit" then break end
+		end
+	end
+end
+
+end
+
+
 -- this is the main interactive screen, it displays info on the boinc processes
 -- running on a given host
 function DisplayHost(server_url)
 local host, projects, tasks, ch, mgr
-local display_state=0
 local boinc_state, result
 
 
@@ -1637,25 +1882,7 @@ Out:move(0,0)
 Out:puts("~yConnecting to host [~0~e"..server_url.."~y]~0\n")
 
 boinc_state=BoincGetState()
-if boinc_state==nil
-then
-	Out:puts("~rERROR: failed to connect to boinc at " .. server_url.."~0\n")
-	if AskToConnectToHost(server_url) 
-	then 
-		boinc_state=BoincGetState() 
-	else
-		return
-	end
-elseif boinc_state=="unauthorized" 
-then
-	Out:puts("~rERROR: authorization failed~0\n")
-	if strutil.strlen(config.gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
-	return
-end
-
-
-if boinc_state ~= nil
-then
+if BoincReconnect(boinc_state) == nil then return end
 
 if strutil.strlen(acct_mgr) > 0 
 then
@@ -1667,41 +1894,13 @@ then
 	end
 end
 
---sets us to the default menu
-MainMenu=MenuRefresh(display_state, boinc_state)
-while true
-do
-	Selected,display_state=DisplayHostProcessMenu(display_state, boinc_state)
 
-	if Selected=="exit" 
-	then 
-		break
-	elseif Selected=="new_project"
-	then
-		JoinProjectScreen()
-	else
-		if display_state==DISPLAY_PROJECTS
-		then
-			DisplayProject(boinc_state.projects[Selected])
-		elseif display_state==DISPLAY_TASKS
-		then
-			DisplayTask(boinc_state.tasks[Selected])
-		else
-			result=ProcessControl(Selected)
-			if result=="exit" then break end
-		end
-	end
-end
+ProcessMenus(boinc_state)
 
 Out:clear()
 Out:move(0,0)
-else
-
-Out:puts("~rERROR: failed to connect to host~0\n");
 end
 
-
-end
 
 
 -- if more than one host has been registered that we can connect to and control
@@ -1845,6 +2044,7 @@ end
 function BoincMgrInit()
 local tempstr
 
+Now=time.secs()
 tempstr=process.getenv("BOINC_USERNAME")
 if strutil.strlen(tempstr) > 0 then acct.username=tempstr end
 tempstr=process.getenv("BOINC_EMAIL")
