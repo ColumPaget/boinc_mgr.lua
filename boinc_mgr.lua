@@ -14,6 +14,8 @@ DISPLAY_PROJECTS=1
 DISPLAY_TASKS=2
 DISPLAY_LOGS=3
 
+-- position of menus on screen so they don't overwrite status headers
+MENU_TOP=10
 
 
 --[[
@@ -217,7 +219,7 @@ Out:bar("Sending "..Type.." request to server ...", "fcolor=yellow bcolor=magent
 BoincRPCAuth(S)
 S:writeln(xml)
 str=S:readto("\003")
-if config.debug == true then io.stderr:write("RECV: " ..xml.."\n") end
+if config.debug == true then io.stderr:write("RECV: " ..str.."\n") end
 P=dataparser.PARSER("xml", str)
 
 if CheckSuccess then result=BoincRPCResult(P, Type) end
@@ -665,9 +667,11 @@ Out:puts("\n~yPLEASE WAIT - UPDATING DATA FROM BOINC~0\n")
 if BoincRPCAuth(S) ~= true then return "unauthorized" end
 
 
-
-S:writeln("<boinc_gui_rpc_request>\n<get_state/>\n</boinc_gui_rpc_request>\n\003")
+str="<boinc_gui_rpc_request>\n<get_state/>\n</boinc_gui_rpc_request>\n\003"
+if config.debug == true then io.stderr:write("SEND: " ..str.."\n") end
+S:writeln(str)
 str=S:readto("\003")
+if config.debug == true then io.stderr:write("RECV: " ..str.."\n") end
 S:close()
 
 P=dataparser.PARSER("xml", str)
@@ -1086,7 +1090,7 @@ local ProjectsAltered=false
 DisplayProjectDetails(proj)
 Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
 
-Menu=terminal.TERMMENU(Out, 1, 15, Out:width() -2, Out:length()-17)
+Menu=terminal.TERMMENU(Out, 1, MENU_TOP, Out:width() -2, Out:length()-17)
 Menu:add("update  - connect to project server", "update")
 if proj.state=="suspend" 
 then
@@ -1184,7 +1188,7 @@ do
 
 	Out:bar("q:exit app  left/right:select menu  up/down/enter:select item  u:update", "fcolor=blue bcolor=cyan")
 	
-	Menu=terminal.TERMMENU(Out, 1, 8, Out:width() - 2, 10)
+	Menu=terminal.TERMMENU(Out, 1, MENU_TOP, Out:width() - 2, 10)
 	if task.state=="run"
 	then
 	Menu:add("pause   - suspend task", "pause")
@@ -1553,8 +1557,29 @@ local Selected
 end
 
 
+function LogFormatForDisplay(item)
+local str, when
 
-function LogLoad(oldest, newest)
+str=strutil.stripTrailingWhitespace(item:value("body"))
+str=strutil.stripLeadingWhitespace(str)
+when=tonumber(item:value("time"))
+
+diff=Now-when
+if diff < 60 then timestr="~ew"
+elseif diff < 300 then timestr="~w"
+elseif diff < 3600 then timestr="~y"
+elseif diff < (3600 * 23) then timestr="~e~m"
+else timestr=""
+end
+
+timestr=timestr .. time.formatsecs("%Y/%m/%d %H:%M:%S  ", when) .."~0"
+str=string.format("%s %20s   %s", timestr, item:value("project"), str)
+
+return str
+end
+
+
+function LogLoad(oldest, newest, project)
 local selected={}
 local item, str, when, diff, timestr
 local count=0
@@ -1564,61 +1589,57 @@ local count=0
 	item=g_Logs:first()
 	while item ~= nil
 	do
-		str=strutil.stripTrailingWhitespace(item:value("body"))
-		str=strutil.stripLeadingWhitespace(str)
+	if project==nil or project==item:value("project")
+	then
 		when=tonumber(item:value("time"))
-		if when > oldest
+		if when >= oldest --and when <= newest
 		then
-			diff=Now-when
-			if diff < 60 then timestr="~ew"
-			elseif diff < 300 then timestr="~w"
-			elseif diff < 3600 then timestr="~y"
-			elseif diff < (3600 * 23) then timestr="~e~m"
-			else timestr="~n"
-			end
-
-			timestr=timestr .. time.formatsecs("%Y/%m/%d %H:%M:%S  ", when) .."~0"
-			str=string.format("%s %20s   %s", timestr, item:value("project"), str)
-			selected[count]=str
+			selected[count]=item
 			count=count+1
 		end
+	end
 
 	item=g_Logs:next()
 	end
-
 
 return selected
 end
 
 
 
-function ExamineLogs()
-local projects={}
-local proj, str
+function ExamineLogs(project)
+local Menu
 
-if g_Logs==nil then g_Logs=GetLogs() end
-item=g_Logs:first()
-while item~= nil
-do
-projects[item:value("project")]="yes"
-item=g_Logs:next()
-end
-
-
-Out:clear()
-Out:move(0,0)
-Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
-Menu:add("view full log", "full")
-for proj,str in pairs(projects) do Menu:add("log for "..proj, proj) end
-Menu:add("back")
+Menu=terminal.TERMMENU(Out, 1, MENU_TOP, Out:width() - 2, Out:length() -14)
+Menu:add("<-- back", "back")
+LogMenu(Menu, project);
 
 Menu:run()
 end
 
 
+function LogMenuLoadProjects(Menu, items)
+local i, item, name, value
+local projects={}
+
+	for i=#items,1,-1
+	do
+	item=items[i]
+        projects[item:value("project")]="yes"
+	end
+
+for name,value in pairs(projects)
+do
+if strutil.strlen(name) > 0 then Menu:add(name, "project:"..name) end
+end
+
+end
+
+
 -- load up log messages from boinc, ready to be displayed
-function LogMenu(Menu)
-local items, i, item
+function LogMenu(Menu, project)
+local items, i, item, str
+local projects={}
 
 	Now=time.secs()
 	--tasks=SortTable(unsort_tasks, TasksSort)
@@ -1626,19 +1647,25 @@ local items, i, item
 
 	if g_Logs==nil then g_Logs=GetLogs() end
 
-	items=LogLoad(Now-3600*24, 0)
+	items=LogLoad(Now-3600*24, 0, project)
 
 	--Menu:add("~e~wExamine Logs~0", "examine")
 	--Menu:add("--- LAST 24 Hours ---")
+
+	-- load projects from items list, unless we are viewing one already
+	if strutil.strlen(project) == 0 then LogMenuLoadProjects(Menu, items) end
+
 	for i=#items,1,-1
 	do
-	Menu:add(string.sub(items[i], 1, Out:width() -8))
+	str=LogFormatForDisplay(items[i])
+	Menu:add(string.sub(str, 1, Out:width() -8))
 	end
-	Menu:add("exit app", "exit")
 
 
 	return true
 end
+
+
 
 
 -- load up details of running tasks ready to be displayed
@@ -1735,7 +1762,7 @@ end
 -- when we switch between menus we need to rebuild them (i.e. load their details into the Menu object)
 function MenuSwitch(display_state, boinc_state)
 
-Menu=terminal.TERMMENU(Out, 1, 10, Out:width() - 2, Out:length() -14)
+Menu=terminal.TERMMENU(Out, 1, MENU_TOP, Out:width() - 2, Out:length() -14)
 Menu:config("~C~n", "~C~e~n")
 Menu:clear()
 if display_state==DISPLAY_LOGS
@@ -1859,7 +1886,8 @@ do
 			DisplayTask(boinc_state.tasks[Selected])
 		elseif display_state==DISPLAY_LOGS
 		then
-			if Selected=="examine" then ExamineLogs() end
+			if Selected=="examine" then ExamineLogs("") end
+			if string.sub(Selected, 1, 8)=="project:" then ExamineLogs(string.sub(Selected, 9)) end
 		else
 			result=ProcessControl(Selected)
 			if result=="exit" then break end
