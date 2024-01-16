@@ -46,8 +46,37 @@ menu_tabbar=""
 
 hosts={}
 boinc_settings={} 
+boinc_state=nil
 
 MainMenu=nil
+
+
+function LookupProject(NameOrURL)
+local proj,url
+
+
+if boinc_state == nil then return(nil) end
+proj=boinc_state.projects[NameOrURL]
+if proj then return(proj) end
+
+for url,proj in pairs(boinc_state.projects)
+do
+if proj.name == NameOrURL then return(proj) end
+end
+
+return(nil)
+end
+
+
+function LookupProjectName(NameOrURL)
+local proj
+
+proj=LookupProject(NameOrURL)
+if proj ~= nil then return(proj.name) end
+return(NameOrURL)
+end
+
+
 
 
 
@@ -488,7 +517,10 @@ end
 function BoincJoinProject(url, authenticator)
 local errno, errstr, str, S, P, project_auth
 
+Out:move(0,0)
+Out:puts("~B~wJoin project " .. url .." ~>~0\n")
 Out:bar("Joining "..url, "fcolor=black bcolor=yellow")
+Out:move(0,2)
 Out:flush()
 str=acct.pass..acct.email
 str=hash.hashstr(str, "md5", "hex")
@@ -496,6 +528,8 @@ str=hash.hashstr(str, "md5", "hex")
 S=BoincConnect(server_url)
 if S ~= nil
 then
+Out:puts("Connected, sending join request\n")
+Out:flush()
 BoincRPCAuth(S)
 
 str="<boinc_gui_rpc_request>\n<create_account>\n   <url>".. url .. "</url>\n   <email_addr>" .. acct.email .. "</email_addr>\n   <passwd_hash>" .. str .. "</passwd_hash>\n   <user_name>" .. acct.username .. "</user_name>\n   <team_name></team_name>\n</create_account>\n</boinc_gui_rpc_request>\n\3"
@@ -518,23 +552,36 @@ do
 	process.sleep(1)
 end
 
+
+Out:puts("Got reply: "..errno.." - "..errstr.."\n")
 P=dataparser.PARSER("xml", str)
 project_auth=P:value("/boinc_gui_rpc_reply/account_out/authenticator")
+Out:puts("project authenticator: " .. project_auth .. "\n")
+Out:flush()
 if strutil.strlen(project_auth) == 0
 then
 	errno, errstr=BoincError(str, "account_out")
-	Out:bar("ERROR: "..errno.." "..errstr, "fcolor=white bcolor=red")
-	Out:flush()
-
+	Out:puts("~rERROR: No project authenticator ErrorCode=" .. errno .. " Error=" .. errstr .."~0\n")
 	--try looking up authenticator
+	Out:puts("Attempt authenticator lookup... \n")
+	Out:flush()
 	project_auth=BoincAcctLookupAuthenticator(S, url, acct.email, acct.pass)
+	Out:puts("GOT: " .. project_auth .. "\n")
+	Out:flush()
 end
 
-BoincAttachProject(S, url, project_auth)
+if strutil.strlen(project_auth) > 0
+then 
+Out:puts("~gGot project autenticator, attaching to project~0\n")
+Out:flush()
+BoincAttachProject(S, url, project_auth) 
+end
 
 S:close()
 end
 
+Out:flush()
+process.sleep(2)
 end
 
 
@@ -656,6 +703,7 @@ function BoincGetState()
 local str, host, proj, task, S
 local state={}
 
+state.authorized=false
 state.projects={}
 state.tasks={}
 
@@ -664,14 +712,13 @@ if S==nil then return nil end
 
 
 Out:puts("\n~yPLEASE WAIT - UPDATING DATA FROM BOINC~0\n")
-if BoincRPCAuth(S) ~= true then return "unauthorized" end
+if BoincRPCAuth(S) ~= true then return state end
+
+state.authorized=true
 
 
-str="<boinc_gui_rpc_request>\n<get_state/>\n</boinc_gui_rpc_request>\n\003"
-if config.debug == true then io.stderr:write("SEND: " ..str.."\n") end
-S:writeln(str)
+S:writeln("<boinc_gui_rpc_request>\n<get_state/>\n</boinc_gui_rpc_request>\n\003")
 str=S:readto("\003")
-if config.debug == true then io.stderr:write("RECV: " ..str.."\n") end
 S:close()
 
 P=dataparser.PARSER("xml", str)
@@ -968,7 +1015,7 @@ do
 	value=Config[name]
 	if value=="true" then value="~w~etrue~0" end
 	if value=="false" then value="~bfalse~0" end
-	Menu:add(string.format("% 30s:  %s", BoincSettingGetName(name), value), name)
+	Menu:add(string.format("%30s:  %s", BoincSettingGetName(name), value), name)
 	end
 end
 
@@ -1221,6 +1268,7 @@ end
 
 function StartBoincLocalhost()
 local pid
+local connected=false
 
 	filesys.mkdir(config.boinc_dir)
 	Out:puts("~yStarting boinc~0\n")
@@ -1241,11 +1289,18 @@ local pid
 		S=BoincConnect(server_url)
 		if S ~= nil
 		then
+			Out:puts("~gConnected~0\n")
 			S:close()
+			process.sleep(1)
+			connected=true
 			break
 		end
 
 		end
+
+
+		if connected == true
+		then
 		S=stream.STREAM(config.boinc_dir.."/gui_rpc_auth.cfg")
 		if S ~=nil
 		then
@@ -1253,8 +1308,12 @@ local pid
 		S:close()
 		SaveGuiKey()
 		end
+		end
 			
 	end
+
+
+return(connected)
 end
 
 
@@ -1284,7 +1343,7 @@ end
 
 
 
-function AskToConnectToHost(server_url)
+function AskToStartBoinc(server_url)
 local str
 
 if server_url ~= "tcp://localhost"
@@ -1470,8 +1529,6 @@ if selectable==true then Menu:add("Custom Project not on official list", "custom
 Selected=DisplayProjectsRunMenu(Menu, projects)
 end
 
-Out:clear()
-Out:move(0,0)
 return Selected
 end
 
@@ -1483,6 +1540,7 @@ end
 
 
 function JoinProjectScreen()
+
 	if strutil.strlen(acct.email)==0 or strutil.strlen(acct.username)==0 or strutil.strlen(acct.pass)==0
 	then
 		Out:move(0,Out:height()-6)
@@ -1493,10 +1551,12 @@ function JoinProjectScreen()
 		Out:getc()
 	else
 		Selected=DisplayProjectsMenu(true)
+		Out:clear()
+		Out:move(0,0)
 
 		if Selected == "custom"
 		then 
-		Out:clear()
+		Out:puts("~B~wJoin 'Custom' project not on official list~>~0\n")
 		Out:move(2,2)
 		Selected=Out:prompt("ENTER PROJECT URL: ")
 		end
@@ -1509,17 +1569,17 @@ end
 
 
 
-function DisplayHostBanner(state)
+function DisplayHostBanner()
 Out:move(0, 0)
-Out:puts("~mHost:~0 ~e".. state.host.name .. "~0 ~c(" .. state.host.ip .. ")~0   ".. state.host.os .. " - " .. state.host.os_version.. "\n")
-Out:puts("~mCPU:~0 " .. state.host.cpus .. "*" .. state.host.processor .. "\n")
-Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(state.host.iops, 2) .. "   ~cfloating-point:~0 " .. strutil.toMetric(state.host.fpops, 2) .. "\n")
-Out:puts("~mMEM:~0 " .. strutil.toMetric(state.host.mem)  .. "\n")
-Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(state.disk_usage) .. "\n")
-Out:puts("~mBoinc Version:~0 ".. state.host.client_version .."\n")
-if state.acct_mgr ~= nil and strutil.strlen(state.acct_mgr.name) > 0 
+Out:puts("~mHost:~0 ~e".. boinc_state.host.name .. "~0 ~c(" .. boinc_state.host.ip .. ")~0   ".. boinc_state.host.os .. " - " .. boinc_state.host.os_version.. "\n")
+Out:puts("~mCPU:~0 " .. boinc_state.host.cpus .. "*" .. boinc_state.host.processor .. "\n")
+Out:puts("~mOPS/s:~0  ~cinteger:~0 " .. strutil.toMetric(boinc_state.host.iops, 2) .. "   ~cfloating-point:~0 " .. strutil.toMetric(boinc_state.host.fpops, 2) .. "\n")
+Out:puts("~mMEM:~0 " .. strutil.toMetric(boinc_state.host.mem)  .. "\n")
+Out:puts("~mDISK:~0  ~ctotal:~0 " .. strutil.toMetric(boinc_state.disk_total) .. "  ~cfree:~0" .. strutil.toMetric(boinc_state.disk_free) .. "  ~cboinc usage:~0 "..strutil.toMetric(boinc_state.disk_usage) .. "\n")
+Out:puts("~mBoinc Version:~0 ".. boinc_state.host.client_version .."\n")
+if boinc_state.acct_mgr ~= nil and strutil.strlen(boinc_state.acct_mgr.name) > 0 
 then 
-	Out:puts("~mAccount Manager:~0 ".. state.acct_mgr.name .. "  " .. state.acct_mgr.url .."\n") 
+	Out:puts("~mAccount Manager:~0 ".. boinc_state.acct_mgr.name .. "  " .. boinc_state.acct_mgr.url .."\n") 
 else
 	Out:puts("~mAccount Manager:~0 ~r~enone~0" .."\n") 
 end
@@ -1529,11 +1589,11 @@ end
 
 -- refresh the screen. Doesn't change any details of what's displayed (that's done in MenuSwitch and it's subfunctions)
 -- but pushes all the data out to the display
-function ScreenRefresh(Menu, boinc_state)
+function ScreenRefresh(Menu)
 
 Out:cork()
 Out:clear()
-DisplayHostBanner(boinc_state)
+DisplayHostBanner()
 Out:move(1,8)
 Out:puts(menu_tabbar)
 Menu:draw()
@@ -1581,7 +1641,7 @@ end
 
 function LogLoad(oldest, newest, project)
 local selected={}
-local item, str, when, diff, timestr
+local item, str, when, diff, timestr, proj_id
 local count=0
 
 	if g_Logs==nil then g_Logs=GetLogs() end
@@ -1589,7 +1649,9 @@ local count=0
 	item=g_Logs:first()
 	while item ~= nil
 	do
-	if project==nil or project==item:value("project")
+	-- proj_id can be url or name
+	proj_id=item:value("project") 
+	if project==nil or project==proj_id or project==LookupProjectName(proj_id)
 	then
 		when=tonumber(item:value("time"))
 		if when >= oldest --and when <= newest
@@ -1622,15 +1684,15 @@ function LogMenuLoadProjects(Menu, items)
 local i, item, name, value
 local projects={}
 
-	for i=#items,1,-1
-	do
-	item=items[i]
-        projects[item:value("project")]="yes"
-	end
+for i=#items,1,-1
+do
+	name=LookupProjectName(items[i]:value("project"))
+        projects[name]="yes"
+end
 
 for name,value in pairs(projects)
 do
-if strutil.strlen(name) > 0 then Menu:add(name, "project:"..name) end
+	if strutil.strlen(name) > 0 then Menu:add(name, "project:"..name) end
 end
 
 end
@@ -1642,12 +1704,11 @@ local items, i, item, str
 local projects={}
 
 	Now=time.secs()
-	--tasks=SortTable(unsort_tasks, TasksSort)
 	menu_tabbar="  Control   Projects   Tasks   [~eLog~0]   "
 
 	if g_Logs==nil then g_Logs=GetLogs() end
 
-	items=LogLoad(Now-3600*24, 0, project)
+	items=LogLoad(Now - 3600*24, 0, project)
 
 	--Menu:add("~e~wExamine Logs~0", "examine")
 	--Menu:add("--- LAST 24 Hours ---")
@@ -1676,7 +1737,7 @@ local tasks={}
 	Now=time.secs()
 	tasks=SortTable(unsort_tasks, TasksSort)
 	menu_tabbar="  Control   Projects  [~eTasks~0]   Log    "
-	menu_tabbar=menu_tabbar..string.format("\n   %4s % 20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due")
+	menu_tabbar=menu_tabbar..string.format("\n   %4s %20s %6s  %7s  %8s  %8s %8s\n", "slot", "project",  "state", "percent", "cpu time", "remaining", "due")
 	for i,task in pairs(tasks)
 	do
 		if task.slot > -1
@@ -1693,7 +1754,7 @@ local tasks={}
 			else state_color=""
 			end
 
-			Menu:add(string.format("%04d ~w% 20s~0 %s%6s~0 % 7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), state_color, task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
+			Menu:add(string.format("%04d ~w%20s~0 %s%6s~0 %7.2f%%  %8s   %8s %8s", task.slot, string.sub(task.proj_name,1,25), state_color, task.state, task.progress * 100.0, FormatTime(task.cpu_time), FormatTime(task.remain_time), due),  task.name)
 		end
 	end
 	Menu:add("exit app", "exit")
@@ -1713,11 +1774,11 @@ local str, name
 
 	menu_tabbar="  Control  [~eProjects~0]  Tasks    Log   "
 	
-	str=string.format("\n   %20s % 7s % 5s % 6s % 6s % 6s", "name", "credit",  "queue", "active", "done", "fail")
+	str=string.format("\n   %20s %7s %5s %6s %6s %6s", "name", "credit",  "queue", "active", "done", "fail")
 
 	if Out:width() > 82
 	then
-		str=str..string.format(" %7s  % 10s  % 10s", "disk use", "cred/hour", "cred/min")
+		str=str..string.format(" %7s  %10s  %10s", "disk use", "cred/hour", "cred/min")
 	end
 	menu_tabbar=menu_tabbar..str
 
@@ -1741,7 +1802,7 @@ local str, name
 		else
 		name=string.sub(proj.name, 1, 20)
 
-		str=string.format("~w%20s~0 % 7s % 5d %s % 6d % 6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
+		str=string.format("~w%20s~0 %7s %5d %s %6d %6d", name, strutil.toMetric(proj.host_credit),  proj.jobs_queued, active, proj.jobs_done, proj.jobs_fail)
 
 		if Out:width() > 82 
 		then
@@ -1760,7 +1821,7 @@ end
 
 
 -- when we switch between menus we need to rebuild them (i.e. load their details into the Menu object)
-function MenuSwitch(display_state, boinc_state)
+function MenuSwitch(display_state)
 
 Menu=terminal.TERMMENU(Out, 1, MENU_TOP, Out:width() - 2, Out:length() -14)
 Menu:config("~C~n", "~C~e~n")
@@ -1785,15 +1846,15 @@ end
 
 -- Read input from the user to select items from the menus, 
 -- or switch between the menus
-function DisplayHostProcessMenu(display_state, boinc_state)
+function DisplayHostProcessMenu(display_state)
 local ch, Selected
 
-ScreenRefresh(MainMenu, boinc_state)
+ScreenRefresh(MainMenu)
 while true
 do
 	-- if we get a SIGWINCH signal, it means the screen has changed size, and we have to rebuild the menu
 	-- to fit the new width/height of the screen
-	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuSwitch(display_state, boinc_state) end
+	if process.sigcheck(process.SIGWINCH)==true then MainMenu=MenuSwitch(display_state) end
 
 	-- refresh the screen, doesn't change any details, just pushes the current screen to the terminal
 
@@ -1809,26 +1870,26 @@ do
 	then
 		boinc_state=BoincGetState()
 		if display_state==DISPLAY_LOGS then GetLogs() end
-		MainMenu=MenuSwitch(display_state, boinc_state)
-		ScreenRefresh(MainMenu, boinc_state)
+		MainMenu=MenuSwitch(display_state)
+		ScreenRefresh(MainMenu)
 	elseif ch=="LEFT" or ch=="CTRL_A" 
 	then 
 		display_state=display_state - 1
 		if display_state < 0 then display_state=0 end
-		MainMenu=MenuSwitch(display_state, boinc_state)
-		ScreenRefresh(MainMenu, boinc_state)
+		MainMenu=MenuSwitch(display_state)
+		ScreenRefresh(MainMenu)
 	elseif ch=="RIGHT" or ch=="CTRL_D"
 	then 
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=DISPLAY_LOGS end
-		MainMenu=MenuSwitch(display_state, boinc_state)
-		ScreenRefresh(MainMenu, boinc_state)
+		MainMenu=MenuSwitch(display_state)
+		ScreenRefresh(MainMenu)
         elseif ch=="\t"
 	then
 		display_state=display_state + 1
 		if display_state > DISPLAY_LOGS then display_state=0 end
-		MainMenu=MenuSwitch(display_state, boinc_state)
-		ScreenRefresh(MainMenu, boinc_state)
+		MainMenu=MenuSwitch(display_state)
+		ScreenRefresh(MainMenu)
 	elseif ch ~= ""
 	then
 		Selected=MainMenu:onkey(ch)
@@ -1842,14 +1903,21 @@ end
 
 
 
-function BoincReconnect(boinc_state)
+function BoincReconnect()
+
+boinc_state=BoincGetState()
 if boinc_state==nil
 then
 	Out:puts("~rERROR: failed to connect to boinc at " .. server_url.."~0\n")
-	if AskToConnectToHost(server_url) then boinc_state=BoincGetState() 
+	if AskToStartBoinc(server_url) == true
+	then 
+		while boinc_state == nil
+		do
+		boinc_state=BoincGetState() 
+		end
 	else return nil
 	end
-elseif boinc_state=="unauthorized" 
+elseif boinc_state.authorized == false
 then
 	Out:puts("~rERROR: authorization failed~0\n")
 	if strutil.strlen(config.gui_key) ==0 then Out:puts("~rno authorization key supplied. Please supply it with the -key command-line option~0\n") end
@@ -1861,15 +1929,15 @@ return boinc_state
 end
 
 
-function ProcessMenus(boinc_state)
+function ProcessMenus()
 local display_state=0
 local Selected
 
 --sets us to the default menu
-MainMenu=MenuSwitch(display_state, boinc_state)
+MainMenu=MenuSwitch(display_state)
 while true
 do
-	Selected,display_state=DisplayHostProcessMenu(display_state, boinc_state)
+	Selected,display_state=DisplayHostProcessMenu(display_state)
 
 	if Selected=="exit" 
 	then 
@@ -1902,15 +1970,15 @@ end
 -- running on a given host
 function DisplayHost(server_url)
 local host, projects, tasks, ch, mgr
-local boinc_state, result
+local result
 
 
 Out:clear()
 Out:move(0,0)
 Out:puts("~yConnecting to host [~0~e"..server_url.."~y]~0\n")
 
-boinc_state=BoincGetState()
-if BoincReconnect(boinc_state) == nil then return end
+boinc_state=BoincReconnect(boinc_state) 
+if boinc_state == nil then return end
 
 if strutil.strlen(acct_mgr) > 0 
 then
@@ -1923,7 +1991,7 @@ then
 end
 
 
-ProcessMenus(boinc_state)
+ProcessMenus()
 
 Out:clear()
 Out:move(0,0)
@@ -1963,6 +2031,7 @@ function PrintHelp()
 	print("   -user <username>    boinc username needed for joining projects")
 	print("   -email <email>      boinc email needed for joining projects")
 	print("   -pass  <pass>       boinc password needed for joining projects")
+	print("   -acct_mgr <url>     url to account manager site to use")
 	print("   -save               save gui_key for url")
 	print("   -debug              enable debugging: lots of stuff printed to stderr")
 	print("   -d                  enable debugging: lots of stuff printed to stderr")
