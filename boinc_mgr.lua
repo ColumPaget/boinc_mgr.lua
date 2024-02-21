@@ -5,8 +5,9 @@ require("dataparser")
 require("terminal")
 require("filesys")
 require("time")
-require("net")
 require("hash")
+require("net")
+require("sys")
 
 
 DISPLAY_CONTROLS=0
@@ -1423,8 +1424,44 @@ end
 function FormatProjectPlatforms(proj)
 local i,item
 local platforms={}
-local str=""
-local ourplat="lin32"
+local str="~r"
+local ourplat="lin"
+
+item=string.lower(sys.type())
+
+if item == "linux"
+then
+ item=sys.arch() 
+ if item == "x86_64" then ourplat="lin64"
+ elseif item == "x86" then ourplat="lin32"
+ elseif item == "arm" then ourplat="linarm32"
+ elseif item == "arm64" then ourplat="linarm64"
+ elseif item =="" then ourplat="lin"
+ end
+elseif item == "freebsd" or item == "openbsd"
+then
+ item=sys.arch() 
+
+ if item == "x86_64" then ourplat="bsd64"
+ elseif item == "x86" then ourplat="bsd32"
+ elseif item == "arm" then ourplat="bsdarm32"
+ elseif item == "arm64" then ourplat="bsdarm64"
+ elseif item =="" then ourplat="bsd" 
+ end
+elseif item == "darwin" or item == "osx"
+then
+ item=sys.arch() 
+
+ if item == "x86_64" then ourplat="osx64"
+ elseif item == "x86" then ourplat="osx32"
+ elseif item == "arm" then ourplat="osxarm32"
+ elseif item == "arm64" then ourplat="osxarm64"
+ elseif item =="" then ourplat="osx" 
+ end
+
+end
+
+
 
 
 for i,item in ipairs(proj.platforms)
@@ -1434,13 +1471,13 @@ end
 
 for item,i in pairs(platforms)
 do
-if item==ourplat then str=str.." ~w"..item.."~0"
+if item==ourplat then str=str.." ~g"..item.."~r"
 else str=str.." "..item
 end
 
 end
 
-return str
+return str .. "~0"
 end
 
 
@@ -1746,7 +1783,7 @@ local tasks={}
 			if diff < 0 then due="~R~w"
 			elseif diff < (3600 * 24) then due="~m"
 			elseif diff < (3600 * 24 * 3) then due="~y"
-			else due="~n"
+			else due=""
 			end
 			due=due .. time.formatsecs("%y/%m/%d", task.deadline) .. "~0"
 
