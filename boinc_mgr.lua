@@ -646,6 +646,7 @@ end
 print("result: [".. result.."]")
 S:close()
 
+acct_mgr=BoincAcctMgrLookup()
 end
 
 end
@@ -701,7 +702,7 @@ end
 
 
 function BoincGetState()
-local str, host, proj, task, S
+local str, host, proj, task, S, P, xml_root
 local state={}
 
 state.authorized=false
@@ -724,14 +725,16 @@ S:close()
 
 P=dataparser.PARSER("xml", str)
 
-I=P:open("/boinc_gui_rpc_reply/client_state")
-item=I:first()
+xml_root=P:open("/boinc_gui_rpc_reply/client_state")
+state.platform=xml_root:value("platform_name")
+
+item=xml_root:first()
 while item ~= nil
 do
 if item:name()=="host_info" 
 then 
 	state.host=ParseHostInfo(item) 
-	state.host.client_version=I:value("core_client_major_version") .. "." .. I:value("core_client_minor_version") .. "." .. I:value("core_client_release")
+	state.host.client_version=xml_root:value("core_client_major_version") .. "." .. xml_root:value("core_client_minor_version") .. "." .. xml_root:value("core_client_release")
 end
 
 if item:name()=="project" 
@@ -747,7 +750,7 @@ then
 end
 
 
-item=I:next()
+item=xml_root:next()
 end
 
 
@@ -1425,44 +1428,12 @@ function FormatProjectPlatforms(proj)
 local i,item
 local platforms={}
 local str="~r"
-local ourplat="lin"
-
-item=string.lower(sys.type())
-
-if item == "linux"
-then
- item=sys.arch() 
- if item == "x86_64" then ourplat="lin64"
- elseif item == "x86" then ourplat="lin32"
- elseif item == "arm" then ourplat="linarm32"
- elseif item == "arm64" then ourplat="linarm64"
- elseif item =="" then ourplat="lin"
- end
-elseif item == "freebsd" or item == "openbsd"
-then
- item=sys.arch() 
-
- if item == "x86_64" then ourplat="bsd64"
- elseif item == "x86" then ourplat="bsd32"
- elseif item == "arm" then ourplat="bsdarm32"
- elseif item == "arm64" then ourplat="bsdarm64"
- elseif item =="" then ourplat="bsd" 
- end
-elseif item == "darwin" or item == "osx"
-then
- item=sys.arch() 
-
- if item == "x86_64" then ourplat="osx64"
- elseif item == "x86" then ourplat="osx32"
- elseif item == "arm" then ourplat="osxarm32"
- elseif item == "arm64" then ourplat="osxarm64"
- elseif item =="" then ourplat="osx" 
- end
-
-end
+local sys_platform=""
+local sys_alt_platform=""
 
 
-
+sys_platform=FormatPlatform(boinc_state.platform)
+if sys_platform == "lin64" then sys_alt_platform="lin32" end
 
 for i,item in ipairs(proj.platforms)
 do
@@ -1471,7 +1442,7 @@ end
 
 for item,i in pairs(platforms)
 do
-if item==ourplat then str=str.." ~g"..item.."~r"
+if item == sys_platform or item == sys_alt_platform then str=str.." ~g"..item.."~r"
 else str=str.." "..item
 end
 
@@ -2016,17 +1987,6 @@ Out:puts("~yConnecting to host [~0~e"..server_url.."~y]~0\n")
 
 boinc_state=BoincReconnect(boinc_state) 
 if boinc_state == nil then return end
-
-if strutil.strlen(acct_mgr) > 0 
-then
-	if acct_mgr == "none" 
-	then
-	BoincAcctMgrLeave()
-	else
-	BoincAcctMgrSet(acct_mgr)
-	end
-end
-
 
 ProcessMenus()
 
