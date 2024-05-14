@@ -2077,7 +2077,7 @@ do
 		elseif arg[i] == "-acct_mgr"
 		then
 			i=i+1
-			acct_mgr=arg[i]
+			config.acct_mgr=arg[i]
 		elseif arg[i] == "-save"
 		then
 			save_key="y"
@@ -2243,7 +2243,11 @@ then
 elseif save_key == "y" 
 then 
 	SaveGuiKey() 
-end 
+end
+
+
+
+BoincAcctMgrSet(config.acct_mgr)
 DisplayHost(server_url) 
 
 Out:reset()
