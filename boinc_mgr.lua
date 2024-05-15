@@ -2247,7 +2247,7 @@ end
 
 
 
-BoincAcctMgrSet(config.acct_mgr)
+if strutil.strlen(config.acct_mgr) > 0 then BoincAcctMgrSet(config.acct_mgr) end
 DisplayHost(server_url) 
 
 Out:reset()
