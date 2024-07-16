@@ -1,0 +1,44 @@
+v3.6 (2024/06/16)
+  * only join account manager if one supplied
+  * fix -acct_mgr not working
+  * accept '-acct_mgr none' for detacting from account manager
+  * new screen for entering account manager via tui rather than command line
+
+v3.5 (2023/11/27)
+  * better log screen
+  * per-project logs
+
+v3.4 (2023/02/23)
+  * reduced screen flicker. Improved 'join projects' screen
+
+v3.3 (2020/06/14)
+  * add TAB key to switch between menus
+  * debug mode added
+  * fix for crash when leaving a project
+
+v3.2 (2020/08/09)
+  * splash of color in menus. various bugfixes
+  * minor changes to allow use of ctrl-WASD keys instead of arrow keys on keyboards without arrows
+  * fix 'join account manager' bug
+
+v3.1 (2020/06/09)
+  * more user interface fixes/changes
+
+
+v3.0 (2020/06/06)
+  * Screen resize support
+  * added -acct_mgr command-line option for setting the account manager
+
+v2.0 (2019/04/13)
+  * config settings now work
+  * handle various issues around matching a key to a server url.
+  * connect to localhost if no target hostname given, ui fixes.
+
+v1.2 (2019/02/18)
+  * now offers a choice of server if multiple urls and keys have been saved
+
+v1.1 (2019/02/02)
+  * change credit displayed in projects menu from total user credit to credit earned by this host. Improve process for starting boinc on localhost
+
+v1.0 (2019/01/31)
+  * Initial release

@@ -615,7 +615,7 @@ P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url></url>\n<name>
 end
 
 
-function BoincAcctMgrSet(url)
+function BoincAcctMgrSet(url, name, password)
 local S, P, str, result, acct_mgr
 
 acct_mgr=BoincAcctMgrLookup()
@@ -626,7 +626,9 @@ if url == acct_mgr.url then return end
 BoincAcctMgrLeave()
 end
 
-P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..acct.username.."</name>\n<password>"..acct.pass.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
+if url ~= "none"
+then
+P=BoincTransaction("<boinc_gui_rpc_request>\n<acct_mgr_rpc>\n<url>"..url.."</url>\n<name>"..name.."</name>\n<password>"..password.."</password>\n</acct_mgr_rpc>\n</boinc_gui_rpc_request>\n\003", false, "Join account manager")
 
 result=BoincRPCResult(P, "Join account manager")
 if result
@@ -648,6 +650,7 @@ S:close()
 
 acct_mgr=BoincAcctMgrLookup()
 end
+end
 
 end
 
@@ -668,6 +671,60 @@ end
 
 return(nil)
 end
+
+
+function BoincAcctMgrConfigScreen()
+local user, url, pass
+
+Out:clear()
+Out:bar("enter account manager details", "fcolor=blue bcolor=cyan")
+Out:move(0,0)
+Out:puts("~B~wSETUP ACCOUNT MANAGER~>~0\n")
+
+Out:puts("\n\nEnter url or name for account manager\n")
+Out:puts("recognized names:\n")
+Out:puts("  bam             -   Boinc Account Manager (default for most people) \n")
+Out:puts("  sciu            -   https://scienceuntied.org\n")
+Out:puts("  science_united  -   https://scienceuntied.org\n")
+Out:puts("  gridrep         -   Grid Republic (www.gridrepublic.org)\n")
+Out:puts("  gridrepublic    -   Grid Republic (www.gridrepublic.org)\n")
+Out:puts("  grcpool         -   GRCPool, earn grc coins (https://www.grcpool.com)\n")
+url=Out:prompt("\nAccount Manager: ")
+
+if strutil.strlen(url) > 0
+then
+
+if url=="bam" then url="https://bam.boincstats.com/"
+elseif url=="sciu" then url="https://scienceunited.org"
+elseif url=="science_united" then url="https://scienceunited.org"
+elseif url=="gridrep" then url="https://www.gridrepublic.org"
+elseif url=="gridrepublic" then url="https://www.gridrepublic.org"
+elseif url=="grcpool" then url="https://www.grcpool.com/"
+end
+
+Out:puts("\nAccount Manager URL: "..url.."\n")
+
+Out:puts("\nEnter username on account manager\n")
+user=Out:prompt("Username: ")
+Out:puts("\nEnter password for account manager\n")
+pass=Out:prompt("Password: ")
+
+if strutil.strlen(user) > 0 and strutil.strlen(pass) > 0
+then
+Out:puts("\n~gAttatching to: "..url .."~0\n")
+Out:flush()
+BoincAcctMgrSet(url, user, pass)
+else
+Out:puts("\n~rERROR: unusuable details. press any key~0\n")
+Out:flush()
+Out:getc()
+end
+
+end
+
+end
+
+
 
 
 function BoincUpdateProjectsDiskUsage(state, projects)
@@ -1373,6 +1430,9 @@ function ProcessControl(Selected)
 if Selected=="shutdown"
 then
 	if BoincShutdown() then return "exit" end
+elseif Selected=="config_acct_mgr"
+then
+	BoincAcctMgrConfigScreen()
 elseif Selected=="update_acct_mgr"
 then
 	BoincAcctMgrSync()
@@ -1618,7 +1678,9 @@ local Selected
 	menu_tabbar=" [~eControl~0]  Projects   Tasks    Log    "
 	Menu:add("configure", "configure")
 	Menu:add("contact servers (tell boinc network is available)", "network_available")
-	Menu:add("update account manager", "update_acct_mgr")
+  if boinc_state.acct_mgr ~= nil and strutil.strlen(boinc_state.acct_mgr.name) > 0 then Menu:add("update account manager", "update_acct_mgr")
+	else Menu:add("configure account manager", "config_acct_mgr")
+	end
 	Menu:add("run benchmarks", "benchmark")
 	Menu:add("shutdown boinc", "shutdown")
 	Menu:add("exit app", "exit")
@@ -2028,7 +2090,8 @@ function PrintHelp()
 	print("   -user <username>    boinc username needed for joining projects")
 	print("   -email <email>      boinc email needed for joining projects")
 	print("   -pass  <pass>       boinc password needed for joining projects")
-	print("   -acct_mgr <url>     url to account manager site to use")
+	print("   -acct_mgr <url>     url to account manager site to use (requires -user and -pass)")
+	print("   -acct_mgr none      detach from any account manager")
 	print("   -save               save gui_key for url")
 	print("   -debug              enable debugging: lots of stuff printed to stderr")
 	print("   -d                  enable debugging: lots of stuff printed to stderr")
@@ -2043,6 +2106,7 @@ function PrintHelp()
 	print("   boinc_mgr.lua <url> -key <key> -save")
 	print("If you save a number of such urls and keys then the program will start to offer a choice of hosts to connect to\n")
   print("If you are going to attach projects to a boinc server, then you'll need to supply the -user, -email and -pass arguments for that project. These are never stored on disk.")
+  print("To join an account manager you'll need to supply -user, and -pass arguments that supply the *account manager* credentials. These are never stored on disk.")
 	
 	os.exit()
 end
@@ -2234,6 +2298,7 @@ ParseCmdLine(arg)
 Out=terminal.TERM()
 --Out:hidecursor()
 
+
 BoincLoadHosts()
 server_url=SelectHost(server_url)
 
@@ -2247,7 +2312,7 @@ end
 
 
 
-if strutil.strlen(config.acct_mgr) > 0 then BoincAcctMgrSet(config.acct_mgr) end
+if strutil.strlen(config.acct_mgr) > 0 then BoincAcctMgrSet(config.acct_mgr, acct.username, acct.pass) end
 DisplayHost(server_url) 
 
 Out:reset()
