@@ -41,4 +41,4 @@ If run without any arguments the program will try to connect to a boinc process 
 SCREENSHOT
 ==========
 
-![Screenshot of boinc_mgr.lua](screenshot.jpg)
+![Screenshot of boinc_mgr.lua](screenshot.png)
